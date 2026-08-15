@@ -6,3 +6,15 @@ dist
 .env.local
 .data
 .DS_Store
+
+# build/test artifacts
+coverage
+*.log
+
+# local debug artifacts (temp files from previous push/verify attempts)
+branch-*.txt
+fetch*.txt
+push-*.txt
+verify*.txt
+verify-*.ps1
+clear-*.ps1
