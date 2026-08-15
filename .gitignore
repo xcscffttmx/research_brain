@@ -10,6 +10,13 @@ dist
 # build/test artifacts
 coverage
 *.log
+.turbo
+.vercel
+
+# IDE / editor local plans
+.cursor/plans/
+.idea/
+.vscode/
 
 # local debug artifacts (temp files from previous push/verify attempts)
 branch-*.txt
