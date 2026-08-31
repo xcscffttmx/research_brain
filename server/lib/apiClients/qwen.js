@@ -2,10 +2,10 @@ import { createAppError } from '../errors.js';
 import { qwenConfig } from '../config.js';
 
 /**
- * Qwen 通用 POST 客户端。
+ * Qwen 通用 POST 请求，返回原始 Response。
  * 保持与 mcp-server.js 原实现同样的错误分类和状态码。
  */
-export async function qwenFetch(endpoint, body) {
+async function postQwen(endpoint, body, { signal } = {}) {
   if (!qwenConfig.apiKey) {
     throw createAppError('MISSING_API_KEY', '缺少 Qwen API Key', '请检查服务端 `.env.local` 中的 `QWEN_API_KEY` 配置。', 500);
   }
@@ -18,9 +18,12 @@ export async function qwenFetch(endpoint, body) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${qwenConfig.apiKey}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal
     });
-  } catch {
+  } catch (error) {
+    // 取消要原样抛出，否则会被误判成网络故障并触发重试
+    if (error?.name === 'AbortError') throw error;
     throw createAppError(
       'NETWORK_UNREACHABLE',
       '无法连接到 Qwen 服务',
@@ -42,7 +45,22 @@ export async function qwenFetch(endpoint, body) {
     throw createAppError('QWEN_HTTP_ERROR', `Qwen 请求失败（${response.status}）`, text || '上游模型服务返回异常响应。', 502);
   }
 
+  return response;
+}
+
+/** 非流式调用，直接返回 JSON */
+export async function qwenFetch(endpoint, body, options) {
+  const response = await postQwen(endpoint, body, options);
   return response.json();
+}
+
+/** 流式调用，返回原始 Response，由调用方消费 SSE */
+export async function qwenStream(endpoint, body, signal) {
+  const response = await postQwen(endpoint, { ...body, stream: true }, { signal });
+  if (!response.body) {
+    throw createAppError('QWEN_STREAM_EMPTY', 'Qwen 流式响应为空', '上游未返回可读流。', 502);
+  }
+  return response;
 }
 
 /**

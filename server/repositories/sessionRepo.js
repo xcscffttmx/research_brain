@@ -13,6 +13,24 @@ export function createSession(title = '新对话') {
   return getSession(id);
 }
 
+/**
+ * 幂等创建：会话 id 由前端生成时使用。
+ * agent_runs / messages 都有 session_id 外键，落库前必须先保证会话行存在。
+ */
+export function ensureSession(id, title = '新对话') {
+  const existing = getSession(id);
+  if (existing) return existing;
+
+  const now = Date.now();
+  getDb()
+    .prepare(
+      `insert into sessions(id, title, created_at, updated_at, summary, summary_upto)
+       values (?, ?, ?, ?, '', 0)`
+    )
+    .run(id, title, now, now);
+  return getSession(id);
+}
+
 /** 按 id 取会话 */
 export function getSession(id) {
   return getDb().prepare('select * from sessions where id = ?').get(id) || null;
