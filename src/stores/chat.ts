@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
+  abortAgentRun,
   clearKnowledgeDocuments,
   deleteKnowledgeDocument,
   fetchKnowledgeDocuments,
   streamAgentChat,
   uploadKnowledgeDocuments
 } from '@/services/qwen';
-import type { ChatMessage, ChatSession, KnowledgeDocument, QwenMessage, ToolInvocation } from '@/types/chat';
+import type { AgentPlan, ChatMessage, ChatSession, KnowledgeDocument, QwenMessage, ToolInvocation } from '@/types/chat';
 
 const SESSION_STORAGE_KEY = 'research-agent-chat-sessions-v2';
 const ACTIVE_SESSION_KEY = 'research-agent-active-session-id-v2';
@@ -138,6 +139,10 @@ export const useChatStore = defineStore('chat', () => {
   const noticeMessage = ref('');
   const sidebarOpen = ref(false);
   const abortController = ref<AbortController | null>(null);
+  /** 当前 Agent run 的 id 与规划，用于精确取消和时间线展示 */
+  const activeRunId = ref<string | null>(null);
+  const activePlan = ref<AgentPlan | null>(null);
+  const agentStage = ref('');
 
   const activeSession = computed(() => {
     return sessions.value.find((session) => session.id === activeConversationId.value) || sessions.value[0];
@@ -291,6 +296,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stopStreaming() {
+    // 先显式通知服务端取消 run，再断开连接：让取消树能立刻回收在途工具调用
+    if (activeRunId.value) {
+      void abortAgentRun(activeRunId.value);
+      activeRunId.value = null;
+    }
+
     abortController.value?.abort();
     abortController.value = null;
     isResponding.value = false;
@@ -338,6 +349,9 @@ export const useChatStore = defineStore('chat', () => {
 
     const controller = new AbortController();
     abortController.value = controller;
+    activeRunId.value = null;
+    activePlan.value = null;
+    agentStage.value = '';
 
     try {
       await streamAgentChat(
@@ -356,6 +370,18 @@ export const useChatStore = defineStore('chat', () => {
           if (event.type === 'token' && event.token) {
             assistantMessage.content += event.token;
             touchActiveSession();
+          }
+
+          if (event.type === 'plan') {
+            activeRunId.value = event.runId ?? null;
+            activePlan.value = event.plan ?? null;
+          }
+
+          if (event.type === 'status') {
+            agentStage.value = event.stage || '';
+            if (event.stage === 'run_started' && event.detail?.runId) {
+              activeRunId.value = String(event.detail.runId);
+            }
           }
 
           if (event.type === 'tool' && event.tool) {
@@ -388,7 +414,8 @@ export const useChatStore = defineStore('chat', () => {
             touchActiveSession();
           }
         },
-        controller.signal
+        controller.signal,
+        activeSession.value.id
       );
 
       if (!controller.signal.aborted && assistantMessage.status !== 'error') {
@@ -406,6 +433,8 @@ export const useChatStore = defineStore('chat', () => {
       if (abortController.value === controller) {
         abortController.value = null;
       }
+      activeRunId.value = null;
+      agentStage.value = '';
       isResponding.value = false;
       touchActiveSession();
     }
@@ -413,7 +442,10 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     activeConversationId,
+    activePlan,
+    activeRunId,
     activeSession,
+    agentStage,
     appendInput,
     clearKnowledge,
     clearMessages,

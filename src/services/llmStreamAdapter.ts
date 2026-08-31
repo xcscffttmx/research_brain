@@ -10,6 +10,7 @@
 /** 统一事件模型 */
 export type StreamEventType =
   | 'delta'
+  | 'plan'
   | 'tool_call'
   | 'tool_result'
   | 'status'
@@ -20,6 +21,16 @@ export type StreamEventType =
 export interface StreamDeltaEvent {
   type: 'delta';
   text: string;
+}
+
+/** Planner 产出的结构化计划，前端据此渲染 Agent 时间线 */
+export interface StreamPlanEvent {
+  type: 'plan';
+  runId?: string;
+  intent: string;
+  needsTools: boolean;
+  steps: Array<{ step: number; tool: string; reason?: string; optional?: boolean }>;
+  stopWhen?: string;
 }
 
 export interface StreamToolCallEvent {
@@ -65,12 +76,17 @@ export interface StreamErrorEvent {
 export interface StreamDoneEvent {
   type: 'done';
   reason: 'complete' | 'interrupted' | 'aborted' | 'error';
+  runId?: string;
   citations?: unknown[];
   tools?: unknown[];
 }
 
+/** done 事件允许的 reason 取值 */
+const DONE_REASONS = new Set(['complete', 'interrupted', 'aborted', 'error']);
+
 export type StreamEvent =
   | StreamDeltaEvent
+  | StreamPlanEvent
   | StreamToolCallEvent
   | StreamToolResultEvent
   | StreamStatusEvent
@@ -247,6 +263,15 @@ export function normalizeFrame(event: string, data: string): StreamEvent | null 
       return { type: 'delta', text: String(payload.text ?? payload.token ?? '') };
     case 'token':
       return { type: 'delta', text: String(payload.token ?? payload.text ?? '') };
+    case 'plan':
+      return {
+        type: 'plan',
+        runId: payload.runId,
+        intent: String(payload.intent ?? ''),
+        needsTools: Boolean(payload.needsTools),
+        steps: Array.isArray(payload.steps) ? payload.steps : [],
+        stopWhen: payload.stopWhen
+      };
     case 'tool_call':
       return {
         type: 'tool_call',
@@ -286,7 +311,9 @@ export function normalizeFrame(event: string, data: string): StreamEvent | null 
     case 'done':
       return {
         type: 'done',
-        reason: 'complete',
+        // 服务端可指明结束原因（cancelled/error），未指明按正常结束处理
+        reason: DONE_REASONS.has(payload.reason) ? payload.reason : 'complete',
+        runId: payload.runId,
         citations: payload.citations ?? [],
         tools: payload.tools ?? []
       };

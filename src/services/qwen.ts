@@ -1,106 +1,98 @@
 import type {
   ApiErrorPayload,
   BackendStreamEvent,
+  Citation,
   ExperimentSpec,
   LiteraturePaper,
   PaperSchema,
   QwenMessage,
   ResearchGapOpportunity,
-  ServerDocumentResponse
+  ServerDocumentResponse,
+  ToolInvocation
 } from '@/types/chat';
+import { streamAgentChat as consumeAgentStream } from './llmStreamAdapter';
 
 function formatApiError(payload: Partial<ApiErrorPayload>, fallback: string) {
   const message = payload.error || fallback;
   return payload.details ? `${message}\n${payload.details}` : message;
 }
 
-function parseSseChunk(chunk: string) {
-  const lines = chunk.split('\n').map((line) => line.trim()).filter(Boolean);
-  const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim() || 'message';
-  const data = lines.find((line) => line.startsWith('data:'))?.slice(5).trim() || '{}';
-  return { event, data };
-}
+/** tool_result 的状态 -> 前端 ToolInvocation 状态 */
+const TOOL_STATUS_MAP: Record<string, ToolInvocation['status']> = {
+  succeeded: 'success',
+  failed: 'error',
+  timeout: 'error',
+  cancelled: 'error'
+};
 
+/**
+ * 发起一轮对话，把 Stream Adapter 的统一事件翻译成 store 使用的事件。
+ *
+ * 解码、Gate 拦截、乱序丢弃都在 llmStreamAdapter 内完成，这里只做形状转换。
+ */
 export async function streamAgentChat(
   messages: QwenMessage[],
   onEvent: (event: BackendStreamEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  sessionId?: string
 ) {
-  const response = await fetch('/api/chat/stream', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ messages }),
-    signal
-  });
+  const stream = consumeAgentStream({ messages, sessionId }, { signal });
 
-  if (!response.ok || !response.body) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `请求失败：${response.status}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-
-  while (true) {
-    if (signal?.aborted) {
-      await reader.cancel();
-      break;
-    }
-
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const segments = buffer.split('\n\n');
-    buffer = segments.pop() ?? '';
-
-    for (const segment of segments) {
-      const { event, data } = parseSseChunk(segment);
-      const payload = JSON.parse(data);
-
-      if (event === 'token') {
-        onEvent({ type: 'token', token: payload.token });
-      }
-
-      if (event === 'tool') {
+  for await (const event of stream) {
+    switch (event.type) {
+      case 'delta':
+        onEvent({ type: 'token', token: event.text });
+        break;
+      case 'plan':
+        onEvent({ type: 'plan', runId: event.runId, plan: { intent: event.intent, steps: event.steps } });
+        break;
+      case 'status':
+        onEvent({ type: 'status', stage: event.stage, detail: event.detail });
+        break;
+      case 'tool_call':
+        onEvent({
+          type: 'tool',
+          tool: { id: event.id, name: event.name, args: (event.args || {}) as Record<string, unknown>, status: 'running' }
+        });
+        break;
+      case 'tool_result':
         onEvent({
           type: 'tool',
           tool: {
-            id: payload.id,
-            name: payload.name,
-            args: payload.args || {},
-            status: payload.status,
+            id: event.id,
+            name: event.name,
+            args: {},
+            status: TOOL_STATUS_MAP[event.status] ?? 'error',
             result:
-              typeof payload.result === 'string'
-                ? payload.result
-                : payload.result
-                  ? JSON.stringify(payload.result, null, 2)
-                  : undefined
+              event.errorMsg ||
+              (typeof event.result === 'string' ? event.result : event.result ? JSON.stringify(event.result, null, 2) : undefined)
           }
         });
-      }
-
-      if (event === 'citations') {
-        onEvent({ type: 'citations', citations: payload.citations || [] });
-      }
-
-      if (event === 'error') {
+        break;
+      case 'error':
+        onEvent({ type: 'error', message: event.message, details: event.details, code: event.code });
+        break;
+      case 'done':
         onEvent({
-          type: 'error',
-          message: payload.message || '请求失败',
-          details: payload.details,
-          code: payload.code
+          type: 'done',
+          reason: event.reason,
+          citations: (event.citations || []) as Citation[],
+          tools: (event.tools || []) as ToolInvocation[]
         });
-      }
-
-      if (event === 'done') {
-        onEvent({ type: 'done', citations: payload.citations || [], tools: payload.tools || [] });
-      }
+        break;
+      default:
+        break;
     }
   }
+}
+
+/** 通知服务端取消指定 run（HTTP 断开之外的显式取消，便于服务端立即回收工具调用） */
+export async function abortAgentRun(runId: string) {
+  await fetch('/api/chat/abort', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ runId })
+  }).catch(() => undefined);
 }
 
 export async function fetchKnowledgeDocuments(): Promise<ServerDocumentResponse[]> {

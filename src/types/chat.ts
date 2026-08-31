@@ -43,8 +43,20 @@ export interface KnowledgeDocument {
   content?: string;
 }
 
+export interface AgentPlanStep {
+  step: number;
+  tool: string;
+  reason?: string;
+  optional?: boolean;
+}
+
+export interface AgentPlan {
+  intent: string;
+  steps: AgentPlanStep[];
+}
+
 export interface BackendStreamEvent {
-  type: 'token' | 'tool' | 'citations' | 'done' | 'error';
+  type: 'token' | 'plan' | 'status' | 'tool' | 'citations' | 'done' | 'error';
   token?: string;
   citations?: Citation[];
   tool?: ToolInvocation;
@@ -52,6 +64,12 @@ export interface BackendStreamEvent {
   message?: string;
   details?: string;
   code?: string;
+  /** Agent Runtime 相关 */
+  runId?: string;
+  plan?: AgentPlan;
+  stage?: string;
+  detail?: Record<string, unknown>;
+  reason?: 'complete' | 'interrupted' | 'aborted' | 'error';
 }
 
 export interface ApiErrorPayload {
