@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS documents (
   size_bytes  INTEGER NOT NULL DEFAULT 0,
   char_count  INTEGER NOT NULL DEFAULT 0,
   source      TEXT NOT NULL DEFAULT 'upload', -- upload | literature
+  -- 原文全文：分块有 overlap，无法无损还原，预览功能需要原文
+  content     TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL
 );
 

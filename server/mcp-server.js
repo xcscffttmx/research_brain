@@ -13,6 +13,7 @@ import { qwenFetch, createEmbedding } from './lib/apiClients/qwen.js';
 import { searchArxiv } from './lib/apiClients/arxiv.js';
 import { searchSemanticScholar } from './lib/apiClients/semanticScholar.js';
 import { searchOpenAlex } from './lib/apiClients/openAlex.js';
+import * as chunkRepo from './repositories/chunkRepo.js';
 
 // 尝试导入PDF和DOCX处理库
 let pdf = null;
@@ -57,9 +58,8 @@ const agents = {
   }
 };
 
+// 知识库文档与分块已迁移到 SQLite（documents / chunks / chunk_vectors），此处只保留文献缓存等易变状态
 const state = {
-  documents: [],
-  chunks: [],
   agentState: {},
   literature: {
     categories: [],
@@ -74,15 +74,10 @@ const state = {
 const dataDir = path.resolve(process.cwd(), '.data');
 const knowledgeStateFile = path.join(dataDir, 'knowledge-state.json');
 
+// 只持久化文献缓存；文档与向量走 SQLite
 async function persistState() {
-  const payload = {
-    documents: state.documents,
-    chunks: state.chunks,
-    literature: state.literature
-  };
-
   await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(knowledgeStateFile, JSON.stringify(payload), 'utf-8');
+  await fs.writeFile(knowledgeStateFile, JSON.stringify({ literature: state.literature }), 'utf-8');
 }
 
 async function hydrateState() {
@@ -93,19 +88,15 @@ async function hydrateState() {
   try {
     const raw = await fs.readFile(knowledgeStateFile, 'utf-8');
     const parsed = JSON.parse(raw);
-    state.documents = Array.isArray(parsed.documents) ? parsed.documents : [];
-    state.chunks = Array.isArray(parsed.chunks) ? parsed.chunks : [];
     state.literature.categories = Array.isArray(parsed?.literature?.categories) ? parsed.literature.categories : [];
     state.literature.tags = Array.isArray(parsed?.literature?.tags) ? parsed.literature.tags : [];
     state.literature.papers = Array.isArray(parsed?.literature?.papers) ? parsed.literature.papers : [];
     state.literature.paperSchemas = parsed?.literature?.paperSchemas && typeof parsed.literature.paperSchemas === 'object'
       ? parsed.literature.paperSchemas
       : {};
-    console.log(`知识库已加载：${state.documents.length} 篇文档，${state.chunks.length} 个分块。`);
+    console.log(`知识库已加载：${chunkRepo.countChunks()} 个分块，文献缓存 ${state.literature.papers.length} 篇。`);
   } catch (error) {
-    console.error('加载本地知识库失败，将使用空状态启动:', error);
-    state.documents = [];
-    state.chunks = [];
+    console.error('加载本地文献缓存失败，将使用空状态启动:', error);
     state.literature.categories = [];
     state.literature.tags = [];
     state.literature.papers = [];
@@ -113,65 +104,49 @@ async function hydrateState() {
   }
 }
 
-function tokenize(input) {
-  return input
-    .toLowerCase()
-    .replace(/[`*_>#\-\[\]\(\)]/g, ' ')
-    .split(/[\s，。；：！？、,.!?;:\/\\|]+/)
-    .filter((token) => token.length > 1);
-}
-
+/**
+ * 定长滑窗分块。返回带原文区间的对象，供证据溯源定位原文位置。
+ */
 function chunkText(text, chunkSize = 900, overlap = 160) {
   const chunks = [];
   let start = 0;
   while (start < text.length) {
     const end = Math.min(text.length, start + chunkSize);
-    const value = text.slice(start, end).trim();
-    if (value) chunks.push(value);
+    const raw = text.slice(start, end);
+    const value = raw.trim();
+    if (value) {
+      // trim 会改变边界，这里换算回原文中的真实区间
+      const leading = raw.length - raw.trimStart().length;
+      chunks.push({ text: value, spanStart: start + leading, spanEnd: start + leading + value.length });
+    }
     start += chunkSize - overlap;
   }
   return chunks;
 }
 
-function cosineSimilarity(a, b) {
-  const len = Math.min(a.length, b.length);
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let index = 0; index < len; index += 1) {
-    dot += a[index] * b[index];
-    normA += a[index] * a[index];
-    normB += b[index] * b[index];
-  }
-  if (!normA || !normB) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-function buildCitation(chunk, score) {
+function buildCitation(row) {
   return {
-    id: chunk.id,
-    title: chunk.documentName,
-    snippet: chunk.text,
-    source: `向量知识库 / ${chunk.documentName}`,
-    score: Number(score.toFixed(4))
+    id: row.chunkId,
+    title: row.documentName,
+    snippet: row.text,
+    source: `向量知识库 / ${row.documentName}`,
+    score: Number(row.score.toFixed(4))
   };
 }
 
+/** 单条相似度下限：低于该值的召回视为噪声 */
+const MIN_VECTOR_SCORE = 0.15;
+
 async function searchKnowledge(query, topK = 4) {
-  if (!state.chunks.length) {
+  if (!chunkRepo.countChunks()) {
     return [];
   }
 
   const queryEmbedding = await createEmbedding(query);
-  return state.chunks
-    .map((chunk) => ({
-      chunk,
-      score: cosineSimilarity(queryEmbedding, chunk.embedding)
-    }))
-    .filter((item) => item.score > 0.15)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
-    .map(({ chunk, score }) => buildCitation(chunk, score));
+  return chunkRepo
+    .searchChunksByVector(queryEmbedding, topK)
+    .filter((row) => row.score > MIN_VECTOR_SCORE)
+    .map(buildCitation);
 }
 
 function cacheLiteraturePapers(rows) {
@@ -505,10 +480,31 @@ function buildExperimentSpecFromGap(opportunityItem, records) {
   return experimentSpecShape.parse(spec);
 }
 
+/**
+ * 把一篇文档写入知识库：先落文档行，再逐块生成向量后单事务写入。
+ * 向量生成放在事务外，避免长时间持有写锁。
+ */
+async function persistDocumentWithChunks({ name, content, source }) {
+  const parts = chunkText(content);
+  const items = [];
+  for (const part of parts) {
+    items.push({ ...part, embedding: await createEmbedding(part.text) });
+  }
+
+  const document = chunkRepo.createDocument({
+    name,
+    content,
+    charCount: content.length,
+    sizeBytes: Buffer.byteLength(content, 'utf-8'),
+    source
+  });
+
+  chunkRepo.insertChunksWithVectors(document.id, items);
+  return document;
+}
+
 async function ingestLiteratureByPaperIds(paperIds) {
   const inserted = [];
-  const nextDocuments = [];
-  const nextChunks = [];
 
   for (const paperId of paperIds) {
     const paper = findCachedPaper(paperId);
@@ -517,7 +513,7 @@ async function ingestLiteratureByPaperIds(paperIds) {
     }
 
     const docName = `paper-${paper.source}-${paper.paperId}.md`;
-    if (state.documents.some((doc) => doc.name === docName)) {
+    if (chunkRepo.findDocumentByName(docName)) {
       continue;
     }
 
@@ -536,43 +532,19 @@ async function ingestLiteratureByPaperIds(paperIds) {
       paper.abstract || 'N/A'
     ].join('\n').trim();
 
-    const document = {
-      id: uid('doc'),
-      name: docName,
-      content,
-      createdAt: Date.now()
-    };
-
-    nextDocuments.push(document);
+    const document = await persistDocumentWithChunks({ name: docName, content, source: 'literature' });
     inserted.push({
       id: document.id,
       name: document.name,
-      createdAt: document.createdAt,
+      createdAt: document.created_at,
       paperId: paper.paperId,
       source: paper.source
     });
-
-    const parts = chunkText(content);
-    for (const part of parts) {
-      const embedding = await createEmbedding(part);
-      nextChunks.push({
-        id: uid('chunk'),
-        documentId: document.id,
-        documentName: document.name,
-        text: part,
-        tokens: tokenize(part),
-        embedding
-      });
-    }
   }
 
   if (!inserted.length) {
     throw createAppError('LITERATURE_NOT_INGESTED', '没有新的文献被导入', '可能是 paperId 无效，或文献已存在于知识库。', 400);
   }
-
-  state.documents.push(...nextDocuments);
-  state.chunks.push(...nextChunks);
-  await persistState();
 
   return inserted;
 }
@@ -622,8 +594,6 @@ async function ingestDocuments(documents) {
   }
 
   const inserted = [];
-  const nextDocuments = [];
-  const nextChunks = [];
 
   for (const source of supported) {
     let content;
@@ -637,51 +607,28 @@ async function ingestDocuments(documents) {
     content = content.trim();
     if (!content) continue;
 
-    const document = {
-      id: uid('doc'),
-      name: source.name,
-      content,
-      createdAt: Date.now()
-    };
-
-    nextDocuments.push(document);
-    inserted.push({ id: document.id, name: document.name, createdAt: document.createdAt });
-
-    const parts = chunkText(content);
-    for (const part of parts) {
-      const embedding = await createEmbedding(part);
-      nextChunks.push({
-        id: uid('chunk'),
-        documentId: document.id,
-        documentName: document.name,
-        text: part,
-        tokens: tokenize(part),
-        embedding
-      });
-    }
+    const document = await persistDocumentWithChunks({ name: source.name, content, source: 'upload' });
+    inserted.push({ id: document.id, name: document.name, createdAt: document.created_at });
   }
 
   if (!inserted.length) {
     throw createAppError('EMPTY_FILES', '上传的文件内容为空', '请确认文件不是空文件，且编码为 UTF-8。', 400);
   }
 
-  state.documents.push(...nextDocuments);
-  state.chunks.push(...nextChunks);
-  await persistState();
-
   return inserted;
 }
 
 function listDocuments() {
-  return state.documents.map((document) => ({
+  return chunkRepo.listDocuments().map((document) => ({
     id: document.id,
     name: document.name,
-    createdAt: document.createdAt
+    createdAt: document.created_at,
+    chunkCount: document.chunkCount
   }));
 }
 
 function getDocumentContent(id) {
-  const document = state.documents.find((doc) => doc.id === id);
+  const document = chunkRepo.getDocument(id);
   if (!document) {
     throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
   }
@@ -689,27 +636,19 @@ function getDocumentContent(id) {
     id: document.id,
     name: document.name,
     content: document.content,
-    createdAt: document.createdAt
+    createdAt: document.created_at
   };
 }
 
 async function deleteDocument(id) {
-  const before = state.documents.length;
-  state.documents = state.documents.filter((document) => document.id !== id);
-  state.chunks = state.chunks.filter((chunk) => chunk.documentId !== id);
-
-  if (before === state.documents.length) {
+  if (!chunkRepo.deleteDocument(id)) {
     throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
   }
-
-  await persistState();
   return { ok: true, id };
 }
 
 async function clearDocuments() {
-  state.documents = [];
-  state.chunks = [];
-  await persistState();
+  chunkRepo.clearAllDocuments();
   return { ok: true };
 }
 

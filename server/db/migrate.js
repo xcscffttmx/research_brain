@@ -17,6 +17,16 @@ const MIGRATIONS = [
       const sql = fs.readFileSync(SCHEMA_FILE, 'utf-8');
       db.exec(sql);
     }
+  },
+  {
+    version: 2,
+    name: 'documents.content for original text preview',
+    up(db) {
+      // 新库由 v1 的 schema.sql 直接建出该列，这里只补老库
+      const columns = db.prepare('pragma table_info(documents)').all();
+      if (columns.some((column) => column.name === 'content')) return;
+      db.exec("alter table documents add column content TEXT NOT NULL DEFAULT ''");
+    }
   }
 ];
 

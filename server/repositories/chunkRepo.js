@@ -2,18 +2,23 @@ import { getDb, toVectorBlob } from '../db/client.js';
 import { uid } from '../lib/utils.js';
 
 /** 新建文档记录 */
-export function createDocument({ name, mimeType = '', sizeBytes = 0, charCount = 0, source = 'upload' }) {
+export function createDocument({ name, mimeType = '', sizeBytes = 0, charCount = 0, source = 'upload', content = '' }) {
   const db = getDb();
   const id = uid('doc');
   db.prepare(
-    `insert into documents(id, name, mime_type, size_bytes, char_count, source, created_at)
-     values (?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, name, mimeType, sizeBytes, charCount, source, Date.now());
+    `insert into documents(id, name, mime_type, size_bytes, char_count, source, content, created_at)
+     values (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, name, mimeType, sizeBytes, charCount, source, content, Date.now());
   return getDocument(id);
 }
 
 export function getDocument(id) {
   return getDb().prepare('select * from documents where id = ?').get(id) || null;
+}
+
+/** 是否已存在同名文档（文献入库去重用） */
+export function findDocumentByName(name) {
+  return getDb().prepare('select * from documents where name = ?').get(name) || null;
 }
 
 export function listDocuments() {
