@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { checkDatabaseHealth } from './db.js';
+import { checkDatabaseHealth } from './db/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -233,7 +233,9 @@ async function callMcpTool(name, args = {}) {
 app.get('/api/health', async (_, res) => {
   try {
     const [dbHealth, mcpResult] = await Promise.all([
-      checkDatabaseHealth().catch((error) => ({ enabled: !!process.env.DATABASE_URL, ok: false, reason: error.message || 'database check failed' })),
+      Promise.resolve()
+        .then(() => checkDatabaseHealth())
+        .catch((error) => ({ enabled: true, ok: false, engine: 'sqlite', reason: error.message || 'database check failed' })),
       (async () => {
         const session = await createMcpSession();
         const result = await session.client.callTool({
@@ -251,8 +253,7 @@ app.get('/api/health', async (_, res) => {
       database: dbHealth,
       envDebug: {
         cwd: process.cwd(),
-        hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
-        databaseUrlPrefix: process.env.DATABASE_URL ? process.env.DATABASE_URL.slice(0, 24) : ''
+        sqlitePath: process.env.SQLITE_PATH || '.data/research-agent.db'
       }
     });
   } catch (error) {
