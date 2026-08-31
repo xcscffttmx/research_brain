@@ -13,7 +13,10 @@ import { createSseWriter } from './lib/sseWriter.js';
 import { runAgentTurn, abortRun, getActiveRunCount } from './agent/runtime.js';
 import { generateAnswerWithGroundedness, collectCitations } from './services/answerGenerator.js';
 import { runAgenticRag } from './services/agenticRag.js';
+import { buildContext, countTokens } from './services/contextManager.js';
 import * as sessionRepo from './repositories/sessionRepo.js';
+import * as messageRepo from './repositories/messageRepo.js';
+import * as agentRunRepo from './repositories/agentRunRepo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -410,21 +413,6 @@ app.post('/api/research/spec/generate', async (req, res) => {
   }
 });
 
-/**
- * 过渡版上下文摘要：把除当前问题外的历史消息压成一段文本。
- * S5 的分层 Context 管理接入后由 contextManager 替换。
- */
-const CONTEXT_HINT_MAX_MESSAGES = 8;
-const CONTEXT_HINT_MAX_CHARS = 2_000;
-
-function buildContextHint(messages) {
-  const history = messages.slice(0, -1).slice(-CONTEXT_HINT_MAX_MESSAGES);
-  const text = history
-    .map((item) => `${item.role}: ${String(item.content || '').replace(/\s+/g, ' ').slice(0, 300)}`)
-    .join('\n');
-  return text.slice(-CONTEXT_HINT_MAX_CHARS);
-}
-
 /** Agent Runtime 的工具调用适配器：把 CancelNode 的 signal 透传给 MCP */
 async function callAgentTool(toolName, args, signal) {
   const session = await createMcpSession();
@@ -466,7 +454,7 @@ app.post('/api/chat/stream', async (req, res) => {
     }
 
     const sessionId = String(req.body?.sessionId || '').trim();
-    // 会话行必须先存在，否则 agent_runs 的外键写入会失败；没传 sessionId 时降级为不落库
+    // 会话行必须先存在，否则 agent_runs / messages 的外键写入会失败；没传 sessionId 时降级为不落库
     let persist = false;
     if (sessionId) {
       try {
@@ -477,10 +465,36 @@ app.post('/api/chat/stream', async (req, res) => {
       }
     }
 
+    // 分层 Context：先按历史组装上下文，再落当前轮的用户消息，避免问题在上下文里出现两次
+    const context = await buildContext({
+      sessionId: persist ? sessionId : '',
+      question,
+      persist,
+      signal: disconnect.signal,
+      deps: { qwenFetch }
+    });
+
+    emit.status('context', {
+      shortTermCount: context.layers.shortTerm.count,
+      shortTermTokens: context.layers.shortTerm.tokens,
+      longTermTokens: context.layers.longTerm.tokens,
+      compressed: context.layers.longTerm.compressed,
+      usedTokens: context.usage.total,
+      availableTokens: context.budget.available
+    });
+
+    let assistantMessageId = null;
+    if (persist) {
+      messageRepo.appendMessage({ sessionId, role: 'user', content: question, tokenCount: countTokens(question) });
+      const draft = messageRepo.appendMessage({ sessionId, role: 'assistant', content: '', status: 'streaming' });
+      assistantMessageId = draft.id;
+    }
+
     const result = await runAgentTurn({
       sessionId,
       question,
-      contextHint: buildContextHint(incomingMessages),
+      assistantMessageId,
+      contextHint: context.contextHint,
       emit,
       externalSignal: disconnect.signal,
       persist,
@@ -493,6 +507,15 @@ app.post('/api/chat/stream', async (req, res) => {
           generateAnswerWithGroundedness({ ctx, signal, onDelta, ...meta })
       }
     });
+
+    if (persist && assistantMessageId) {
+      messageRepo.updateMessage(assistantMessageId, {
+        content: result.answer || '',
+        tokenCount: countTokens(result.answer || ''),
+        status: result.status === 'succeeded' ? 'done' : result.status
+      });
+      if (result.runId) agentRunRepo.attachRunMessage(result.runId, assistantMessageId);
+    }
 
     // citations 随 done 一起下发；工具调用已在 tool_call / tool_result 事件中流式给过，不重复下发
     const citations = result.citations?.length ? result.citations : collectCitations(result.toolResults || []);
