@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildAnswerMessages, consumeQwenStream, collectCitations } from './answerGenerator.js';
+import {
+  buildAnswerMessages,
+  consumeQwenStream,
+  collectCitations,
+  extractCitedIndexes,
+  generateAnswerWithGroundedness
+} from './answerGenerator.js';
 
 /** 把字符串按固定长度切成多个 chunk，模拟网络分片 */
 function toStream(text, chunkSize = 8) {
@@ -102,5 +108,128 @@ describe('collectCitations', () => {
   it('结果里没有 citations 时返回空数组', () => {
     expect(collectCitations([{ result: { count: 1 } }, { result: null }])).toEqual([]);
     expect(collectCitations()).toEqual([]);
+  });
+});
+
+describe('证据注入', () => {
+  const citations = [
+    { index: 1, title: 'a.md', snippet: '证据一', score: 0.8 },
+    { index: 2, title: 'b.md', snippet: '证据二', score: 0.5 }
+  ];
+
+  it('带证据时注入【检索证据】并要求 [^n] 角标', () => {
+    const messages = buildAnswerMessages({ question: 'q', citations });
+    expect(messages[0].content).toContain('[^n]');
+    expect(messages[1].content).toContain('【检索证据】');
+    expect(messages[1].content).toContain('[^2]');
+  });
+
+  it('有证据时不重复注入 retrieve_knowledge 的原始结果', () => {
+    const messages = buildAnswerMessages({
+      question: 'q',
+      citations,
+      toolResults: [
+        { step: 1, tool: 'retrieve_knowledge', result: { citations } },
+        { step: 2, tool: 'get_current_time', result: { iso: 'x' } }
+      ]
+    });
+
+    expect(messages[1].content).toContain('get_current_time');
+    expect(messages[1].content).not.toContain('retrieve_knowledge（step 1）');
+  });
+});
+
+describe('extractCitedIndexes', () => {
+  it('抽取答案中出现的角标序号', () => {
+    expect(extractCitedIndexes('结论 A[^1]，结论 B[^3][^1]。')).toEqual(new Set([1, 3]));
+    expect(extractCitedIndexes('没有角标')).toEqual(new Set());
+  });
+});
+
+describe('generateAnswerWithGroundedness', () => {
+  const citations = [{ index: 1, title: 'a.md', snippet: '证据', score: 0.8 }];
+
+  it('无证据时不做核查', async () => {
+    const verify = vi.fn();
+    const result = await generateAnswerWithGroundedness({
+      ctx: { question: 'q' },
+      deps: { generate: async () => '答案', verify }
+    });
+
+    expect(result).toMatchObject({ answer: '答案', verification: null, supplemented: false });
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('核查通过则不补充检索', async () => {
+    const retrieveMore = vi.fn();
+    const result = await generateAnswerWithGroundedness({
+      ctx: { question: 'q', citations },
+      deps: {
+        generate: async () => '答案[^1]',
+        verify: async () => ({ grounded: true, score: 1, unsupported: [], missingInfo: '', skipped: false }),
+        retrieveMore
+      }
+    });
+
+    expect(result.supplemented).toBe(false);
+    expect(retrieveMore).not.toHaveBeenCalled();
+  });
+
+  it('核查被跳过时也不触发补充检索', async () => {
+    const retrieveMore = vi.fn();
+    await generateAnswerWithGroundedness({
+      ctx: { question: 'q', citations },
+      deps: {
+        generate: async () => '答案',
+        verify: async () => ({ grounded: false, score: 0, unsupported: [], missingInfo: '缺东西', skipped: true }),
+        retrieveMore
+      }
+    });
+    expect(retrieveMore).not.toHaveBeenCalled();
+  });
+
+  it('不达标时按缺失信息补充检索并追加输出', async () => {
+    const deltas = [];
+    const emit = { status: vi.fn() };
+    let call = 0;
+
+    const result = await generateAnswerWithGroundedness({
+      ctx: { question: 'q', citations },
+      emit,
+      onDelta: (text) => deltas.push(text),
+      deps: {
+        generate: async (ctx, _signal, onDelta) => {
+          call += 1;
+          const text = call === 1 ? '初版答案' : '补充答案';
+          onDelta?.(text);
+          return text;
+        },
+        verify: async () => ({ grounded: false, score: 0.2, unsupported: ['x'], missingInfo: '缺少实验数据', skipped: false }),
+        retrieveMore: async () => ({ citations: [{ index: 1, title: 'b.md', snippet: '新证据', score: 0.7 }] })
+      }
+    });
+
+    expect(result.supplemented).toBe(true);
+    expect(result.answer).toContain('初版答案');
+    expect(result.answer).toContain('补充答案');
+    // 补充证据接着前面的序号编号，避免撞号
+    expect(result.citations.map((c) => c.index)).toEqual([1, 2]);
+    expect(deltas.some((text) => text.includes('补充（基于追加检索）'))).toBe(true);
+    expect(emit.status).toHaveBeenCalledWith('verifying', {});
+    expect(emit.status).toHaveBeenCalledWith('supplementing', { missingInfo: '缺少实验数据' });
+  });
+
+  it('补充检索没查到新证据时保持原答案', async () => {
+    const result = await generateAnswerWithGroundedness({
+      ctx: { question: 'q', citations },
+      deps: {
+        generate: async () => '初版答案',
+        verify: async () => ({ grounded: false, score: 0.2, unsupported: [], missingInfo: '缺东西', skipped: false }),
+        retrieveMore: async () => ({ citations: [] })
+      }
+    });
+
+    expect(result.answer).toBe('初版答案');
+    expect(result.supplemented).toBe(false);
   });
 });
