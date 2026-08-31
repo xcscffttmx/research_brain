@@ -3,6 +3,25 @@ import { createPlan, createDirectAnswerPlan } from './planner.js';
 import { executePlan } from './executor.js';
 import * as agentRunRepo from '../repositories/agentRunRepo.js';
 
+/** 该工具不走 MCP，交给注入的 Agentic RAG 链路执行 */
+const RAG_TOOL_NAME = 'retrieve_knowledge';
+
+/**
+ * 把 AbortSignal 包成 CancelNode 的最小接口。
+ * Executor 只把 signal 传给工具，而 RAG 链路需要 throwIfCancelled 语义。
+ */
+function nodeFromSignal(signal) {
+  return {
+    signal,
+    get isCancelled() {
+      return Boolean(signal?.aborted);
+    },
+    throwIfCancelled() {
+      if (signal?.aborted) throw new CancelledError({ code: CancelReason.USER_ABORT, detail: '上游已取消' });
+    }
+  };
+}
+
 /**
  * Agent Runtime —— 一次对话轮次的完整生命周期编排。
  *
@@ -58,7 +77,7 @@ export async function runAgentTurn({
   deps,
   persist = true
 }) {
-  const { qwenFetch, callTool, generateAnswer } = deps;
+  const { qwenFetch, callTool, generateAnswer, runRag } = deps;
 
   let run = null;
   let cancelRoot = null;
@@ -110,7 +129,7 @@ export async function runAgentTurn({
         plan,
         runId: run.id,
         cancelNode: cancelRoot,
-        callTool,
+        callTool: buildToolDispatcher({ callTool, runRag, question, runId: run.id, emit, persist }),
         emit,
         persist
       });
@@ -123,19 +142,36 @@ export async function runAgentTurn({
     const answerNode = cancelRoot.child('generator');
 
     let answer = '';
+    let citations = collectRagCitations(execution.results);
+    let verification = null;
+
     try {
-      answer = await generateAnswer(
+      const generated = await generateAnswer(
         {
           question,
           contextHint,
           plan,
           toolResults: execution.results,
           failedSteps: execution.failedSteps,
-          scratchpad: execution.scratchpad
+          scratchpad: execution.scratchpad,
+          // 检索链路产出的证据，供生成阶段注入 [^n] 引用
+          citations
         },
         answerNode.signal,
-        (delta) => emit?.delta?.(delta)
+        (delta) => emit?.delta?.(delta),
+        { runId: run.id, emit, cancelNode: answerNode, persist }
       );
+
+      // 生成阶段可能返回纯文本，也可能返回带核查结果的对象
+      if (typeof generated === 'string') {
+        answer = generated;
+      } else {
+        answer = generated?.answer ?? '';
+        verification = generated?.verification ?? null;
+        if (Array.isArray(generated?.citations) && generated.citations.length) {
+          citations = generated.citations;
+        }
+      }
     } finally {
       answerNode.detach();
     }
@@ -148,6 +184,8 @@ export async function runAgentTurn({
       status: 'succeeded',
       plan,
       answer,
+      citations,
+      verification,
       toolResults: execution.results,
       failedSteps: execution.failedSteps,
       partial: execution.aborted
@@ -194,4 +232,43 @@ export async function runAgentTurn({
 
 function isCancellation(error) {
   return error instanceof CancelledError || error?.code === 'CANCELLED';
+}
+
+/**
+ * 工具分发：retrieve_knowledge 交给 Agentic RAG，其余走 MCP。
+ * 仍然经过 Executor 的 Timeout/Retry 与取消树，行为与普通工具一致。
+ */
+function buildToolDispatcher({ callTool, runRag, question, runId, emit, persist }) {
+  return async (toolName, args, signal) => {
+    if (runRag && toolName === RAG_TOOL_NAME) {
+      const result = await runRag({
+        question: args?.query || question,
+        runId,
+        emit,
+        cancelNode: nodeFromSignal(signal),
+        persist
+      });
+
+      // 返回给 scratchpad 的结构保持「工具结果」形状，后续步骤可用 {{step1.citations}}
+      return {
+        needsRetrieval: result.needsRetrieval,
+        citations: result.citations,
+        hops: result.hops,
+        degraded: result.degraded,
+        count: result.citations.length
+      };
+    }
+
+    return callTool(toolName, args, signal);
+  };
+}
+
+/** 从工具结果里取出 RAG 证据（带 index 的才是 Agentic RAG 产出） */
+function collectRagCitations(results = []) {
+  for (const item of results) {
+    if (item.tool !== RAG_TOOL_NAME) continue;
+    const citations = item.result?.citations;
+    if (Array.isArray(citations) && citations.length) return citations;
+  }
+  return [];
 }

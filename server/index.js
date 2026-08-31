@@ -11,7 +11,8 @@ import { createAppError } from './lib/errors.js';
 import { qwenFetch } from './lib/apiClients/qwen.js';
 import { createSseWriter } from './lib/sseWriter.js';
 import { runAgentTurn, abortRun, getActiveRunCount } from './agent/runtime.js';
-import { generateAnswer, collectCitations } from './services/answerGenerator.js';
+import { generateAnswerWithGroundedness, collectCitations } from './services/answerGenerator.js';
+import { runAgenticRag } from './services/agenticRag.js';
 import * as sessionRepo from './repositories/sessionRepo.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -486,18 +487,22 @@ app.post('/api/chat/stream', async (req, res) => {
       deps: {
         qwenFetch,
         callTool: callAgentTool,
-        generateAnswer
+        runRag: runAgenticRag,
+        // 生成阶段负责注入证据、核查 groundedness，必要时补充检索
+        generateAnswer: (ctx, signal, onDelta, meta) =>
+          generateAnswerWithGroundedness({ ctx, signal, onDelta, ...meta })
       }
     });
 
     // citations 随 done 一起下发；工具调用已在 tool_call / tool_result 事件中流式给过，不重复下发
-    const citations = collectCitations(result.toolResults || []);
+    const citations = result.citations?.length ? result.citations : collectCitations(result.toolResults || []);
 
     emit.done({
       runId: result.runId,
       status: result.status,
       reason: result.status === 'cancelled' ? 'aborted' : 'complete',
-      citations
+      citations,
+      verification: result.verification || undefined
     });
   } catch (error) {
     const payload = getErrorPayload(error, '服务异常');

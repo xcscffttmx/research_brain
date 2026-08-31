@@ -217,6 +217,140 @@ describe('runAgentTurn 降级与容错', () => {
   });
 });
 
+describe('runAgentTurn 与 Agentic RAG 的接线', () => {
+  const ragPlan = {
+    needsTools: true,
+    intent: '查知识库',
+    steps: [{ step: 1, tool: 'retrieve_knowledge', args: { query: '子问题' }, reason: '查资料' }],
+    stopWhen: '查完'
+  };
+
+  it('retrieve_knowledge 走 runRag 而不是 MCP', async () => {
+    const callTool = vi.fn();
+    const runRag = vi.fn(async () => ({
+      needsRetrieval: true,
+      citations: [{ index: 1, id: 'c1', title: 'a.md', snippet: '证据' }],
+      hops: [{ hop: 1 }],
+      degraded: false
+    }));
+
+    const result = await runAgentTurn({
+      sessionId: 's1',
+      question: '原问题',
+      emit: makeEmitter(),
+      persist: false,
+      deps: { qwenFetch: planResponse(ragPlan), callTool, runRag, generateAnswer: async () => '答案' }
+    });
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(runRag).toHaveBeenCalledTimes(1);
+    expect(runRag.mock.calls[0][0].question).toBe('子问题');
+    expect(result.citations).toHaveLength(1);
+  });
+
+  it('args 里没有 query 时用用户原始问题检索', async () => {
+    const runRag = vi.fn(async () => ({ needsRetrieval: true, citations: [], hops: [], degraded: false }));
+    const plan = { ...ragPlan, steps: [{ step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r' }] };
+
+    await runAgentTurn({
+      sessionId: 's1',
+      question: '原问题',
+      emit: makeEmitter(),
+      persist: false,
+      deps: { qwenFetch: planResponse(plan), callTool: vi.fn(), runRag, generateAnswer: async () => 'a' }
+    });
+
+    expect(runRag.mock.calls[0][0].question).toBe('原问题');
+  });
+
+  it('证据透传给生成阶段', async () => {
+    const citations = [{ index: 1, id: 'c1', title: 'a.md', snippet: '证据' }];
+    let ctx = null;
+
+    await runAgentTurn({
+      sessionId: 's1',
+      question: 'q',
+      emit: makeEmitter(),
+      persist: false,
+      deps: {
+        qwenFetch: planResponse(ragPlan),
+        callTool: vi.fn(),
+        runRag: async () => ({ needsRetrieval: true, citations, hops: [], degraded: false }),
+        generateAnswer: async (received) => {
+          ctx = received;
+          return 'a';
+        }
+      }
+    });
+
+    expect(ctx.citations).toEqual(citations);
+  });
+
+  it('生成阶段返回对象时取出 answer / citations / verification', async () => {
+    const result = await runAgentTurn({
+      sessionId: 's1',
+      question: 'q',
+      emit: makeEmitter(),
+      persist: false,
+      deps: {
+        qwenFetch: planResponse(noToolPlan),
+        callTool: vi.fn(),
+        generateAnswer: async () => ({
+          answer: '答案',
+          citations: [{ index: 1, id: 'c9' }],
+          verification: { grounded: false, score: 0.3 }
+        })
+      }
+    });
+
+    expect(result.answer).toBe('答案');
+    expect(result.citations).toEqual([{ index: 1, id: 'c9' }]);
+    expect(result.verification).toMatchObject({ grounded: false });
+  });
+
+  it('没注入 runRag 时 retrieve_knowledge 退回 MCP', async () => {
+    const callTool = vi.fn(async () => ({ citations: [] }));
+
+    await runAgentTurn({
+      sessionId: 's1',
+      question: 'q',
+      emit: makeEmitter(),
+      persist: false,
+      deps: { qwenFetch: planResponse(ragPlan), callTool, generateAnswer: async () => 'a' }
+    });
+
+    expect(callTool).toHaveBeenCalledWith('retrieve_knowledge', { query: '子问题' }, expect.anything());
+  });
+
+  it('RAG 阶段被取消时整轮记为 cancelled', async () => {
+    const controller = new AbortController();
+    const emit = makeEmitter();
+
+    const promise = runAgentTurn({
+      sessionId: 's1',
+      question: 'q',
+      emit,
+      externalSignal: controller.signal,
+      persist: false,
+      deps: {
+        qwenFetch: planResponse(ragPlan),
+        callTool: vi.fn(),
+        runRag: ({ cancelNode }) =>
+          new Promise((_, reject) => {
+            cancelNode.signal.addEventListener('abort', () => reject(new CancelledError({ code: 'x' })), { once: true });
+          }),
+        generateAnswer: async () => 'never'
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    controller.abort();
+
+    const result = await promise;
+    expect(result.status).toBe('cancelled');
+  });
+});
+
 describe('runAgentTurn 取消', () => {
   it('外部 signal abort 时返回 cancelled', async () => {
     const controller = new AbortController();
