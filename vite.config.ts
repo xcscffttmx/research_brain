@@ -16,5 +16,14 @@ export default defineConfig({
         changeOrigin: true
       }
     }
+  },
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts', 'server/**/*.test.js'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/services/**', 'src/composables/**', 'server/lib/**', 'server/services/**'],
+      reporter: ['text', 'html']
+    }
   }
 });
