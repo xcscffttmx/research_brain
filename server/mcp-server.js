@@ -6,6 +6,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
+// 拆分后的通用工具与外部客户端（P1-a 抽出）
+import { createAppError } from './lib/errors.js';
+import { uid, normalizeWhitespace } from './lib/utils.js';
+import { qwenFetch, createEmbedding } from './lib/apiClients/qwen.js';
+import { searchArxiv } from './lib/apiClients/arxiv.js';
+import { searchSemanticScholar } from './lib/apiClients/semanticScholar.js';
+import { searchOpenAlex } from './lib/apiClients/openAlex.js';
+
 // 尝试导入PDF和DOCX处理库
 let pdf = null;
 let mammoth = null;
@@ -61,11 +69,7 @@ const state = {
   }
 };
 
-const config = {
-  apiKey: process.env.QWEN_API_KEY,
-  baseUrl: (process.env.QWEN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/$/, ''),
-  embeddingModel: process.env.QWEN_EMBEDDING_MODEL || 'text-embedding-v3'
-};
+// 注：Qwen 配置已迁移到 lib/config.js，通过 apiClients/qwen.js 内部消费。
 
 const dataDir = path.resolve(process.cwd(), '.data');
 const knowledgeStateFile = path.join(dataDir, 'knowledge-state.json');
@@ -109,18 +113,6 @@ async function hydrateState() {
   }
 }
 
-function uid(prefix) {
-  return `${prefix}-${crypto.randomUUID()}`;
-}
-
-function createAppError(code, message, details = '', status = 500) {
-  const error = new Error(message);
-  error.code = code;
-  error.details = details;
-  error.status = status;
-  return error;
-}
-
 function tokenize(input) {
   return input
     .toLowerCase()
@@ -155,60 +147,6 @@ function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-async function qwenFetch(endpoint, body) {
-  if (!config.apiKey) {
-    throw createAppError('MISSING_API_KEY', '缺少 Qwen API Key', '请检查服务端 `.env.local` 中的 `QWEN_API_KEY` 配置。', 500);
-  }
-
-  let response;
-  try {
-    response = await fetch(`${config.baseUrl}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify(body)
-    });
-  } catch {
-    throw createAppError(
-      'NETWORK_UNREACHABLE',
-      '无法连接到 Qwen 服务',
-      '当前运行环境访问 DashScope 失败。请检查网络、代理、VPN 或防火墙设置。',
-      502
-    );
-  }
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    if (response.status === 401) {
-      throw createAppError('INVALID_API_KEY', 'Qwen API Key 无效或已过期', text || '请检查 `QWEN_API_KEY` 是否正确。', 401);
-    }
-
-    if (response.status === 429) {
-      throw createAppError('RATE_LIMITED', 'Qwen 请求过于频繁', text || '请稍后重试，或检查账户配额是否充足。', 429);
-    }
-
-    throw createAppError('QWEN_HTTP_ERROR', `Qwen 请求失败（${response.status}）`, text || '上游模型服务返回异常响应。', 502);
-  }
-
-  return response.json();
-}
-
-async function createEmbedding(text) {
-  const result = await qwenFetch('/embeddings', {
-    model: config.embeddingModel,
-    input: text.slice(0, 6000)
-  });
-
-  const vector = result.data?.[0]?.embedding;
-  if (!vector) {
-    throw createAppError('EMBEDDING_EMPTY', 'Embedding 生成失败', '模型返回为空，无法建立向量索引。', 502);
-  }
-
-  return vector;
-}
-
 function buildCitation(chunk, score) {
   return {
     id: chunk.id,
@@ -234,187 +172,6 @@ async function searchKnowledge(query, topK = 4) {
     .sort((a, b) => b.score - a.score)
     .slice(0, topK)
     .map(({ chunk, score }) => buildCitation(chunk, score));
-}
-
-function normalizeWhitespace(value = '') {
-  return String(value).replace(/\s+/g, ' ').trim();
-}
-
-function pickText(raw, tag) {
-  const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
-  const match = raw.match(regex);
-  return normalizeWhitespace(match?.[1] || '');
-}
-
-function pickAllTexts(raw, tag) {
-  const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
-  const values = [];
-  let match = regex.exec(raw);
-  while (match) {
-    values.push(normalizeWhitespace(match[1]));
-    match = regex.exec(raw);
-  }
-  return values.filter(Boolean);
-}
-
-function parseArxivFeed(xml) {
-  const entries = [];
-  const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi;
-  let match = entryRegex.exec(xml);
-
-  while (match) {
-    const block = match[1];
-    const id = pickText(block, 'id');
-    const title = pickText(block, 'title');
-    const summary = pickText(block, 'summary');
-    const published = pickText(block, 'published');
-    const year = Number(published.slice(0, 4)) || null;
-    const authors = pickAllTexts(block, 'name');
-
-    const pdfLinkMatch = block.match(/<link[^>]*title="pdf"[^>]*href="([^"]+)"/i);
-    const pdfUrl = pdfLinkMatch?.[1] || '';
-
-    entries.push({
-      source: 'arxiv',
-      paperId: id || uid('arxiv'),
-      title: title || 'Untitled',
-      abstract: summary || '',
-      authors,
-      year,
-      venue: 'arXiv',
-      url: id || pdfUrl || '',
-      pdfUrl: pdfUrl || '',
-      citationCount: null,
-      referenceCount: null
-    });
-
-    match = entryRegex.exec(xml);
-  }
-
-  return entries;
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw createAppError('UPSTREAM_TIMEOUT', `上游请求超时（>${timeoutMs}ms）`, '请稍后重试或切换数据源。', 504);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function searchArxiv(query, limit = 5) {
-  const endpoint = new URL('https://export.arxiv.org/api/query');
-  endpoint.searchParams.set('search_query', `all:${query}`);
-  endpoint.searchParams.set('start', '0');
-  endpoint.searchParams.set('max_results', String(limit));
-  endpoint.searchParams.set('sortBy', 'relevance');
-  endpoint.searchParams.set('sortOrder', 'descending');
-
-  const response = await fetchWithTimeout(endpoint, {}, 8000);
-  if (!response.ok) {
-    throw createAppError('ARXIV_FETCH_FAILED', `arXiv 检索失败（${response.status}）`, '请稍后重试。', 502);
-  }
-
-  const xml = await response.text();
-  return parseArxivFeed(xml);
-}
-
-async function searchSemanticScholar(query, limit = 5) {
-  const endpoint = new URL('https://api.semanticscholar.org/graph/v1/paper/search');
-  endpoint.searchParams.set('query', query);
-  endpoint.searchParams.set('limit', String(limit));
-  endpoint.searchParams.set('fields', 'paperId,title,abstract,year,venue,authors,url,citationCount,referenceCount,openAccessPdf');
-
-  const headers = {};
-  if (process.env.SEMANTIC_SCHOLAR_API_KEY) {
-    headers['x-api-key'] = process.env.SEMANTIC_SCHOLAR_API_KEY;
-  }
-
-  const response = await fetchWithTimeout(endpoint, { headers }, 8000);
-  if (!response.ok) {
-    throw createAppError('SEMANTIC_SCHOLAR_FETCH_FAILED', `Semantic Scholar 检索失败（${response.status}）`, '请稍后重试。', 502);
-  }
-
-  const payload = await response.json();
-  const rows = Array.isArray(payload.data) ? payload.data : [];
-  return rows.map((item) => ({
-    source: 'semantic_scholar',
-    paperId: item.paperId || uid('s2'),
-    title: item.title || 'Untitled',
-    abstract: item.abstract || '',
-    authors: Array.isArray(item.authors) ? item.authors.map((author) => author.name).filter(Boolean) : [],
-    year: item.year || null,
-    venue: item.venue || '',
-    url: item.url || '',
-    pdfUrl: item.openAccessPdf?.url || '',
-    citationCount: Number.isFinite(item.citationCount) ? item.citationCount : null,
-    referenceCount: Number.isFinite(item.referenceCount) ? item.referenceCount : null
-  }));
-}
-
-async function searchOpenAlex(query, limit = 5) {
-  const endpoint = new URL('https://api.openalex.org/works');
-  endpoint.searchParams.set('search', query);
-  endpoint.searchParams.set('per-page', String(limit));
-  endpoint.searchParams.set('select', 'id,display_name,publication_year,abstract_inverted_index,authorships,primary_location,cited_by_count,referenced_works_count,open_access');
-
-  const response = await fetchWithTimeout(endpoint, {}, 8000);
-  if (!response.ok) {
-    throw createAppError('OPENALEX_FETCH_FAILED', `OpenAlex 检索失败（${response.status}）`, '请稍后重试。', 502);
-  }
-
-  const payload = await response.json();
-  const rows = Array.isArray(payload.results) ? payload.results : [];
-
-  function recoverAbstract(invertedIndex) {
-    if (!invertedIndex || typeof invertedIndex !== 'object') return '';
-    const pairs = [];
-    for (const [word, positions] of Object.entries(invertedIndex)) {
-      if (!Array.isArray(positions)) continue;
-      for (const pos of positions) {
-        if (Number.isInteger(pos)) pairs.push([pos, word]);
-      }
-    }
-    return pairs
-      .sort((a, b) => a[0] - b[0])
-      .map((item) => item[1])
-      .join(' ')
-      .trim();
-  }
-
-  return rows.map((item) => {
-    const id = typeof item.id === 'string' ? item.id : '';
-    const paperId = id ? id.split('/').pop() : uid('openalex');
-    const authors = Array.isArray(item.authorships)
-      ? item.authorships
-          .map((auth) => auth?.author?.display_name)
-          .filter(Boolean)
-      : [];
-
-    const primaryUrl = item?.primary_location?.landing_page_url || item?.primary_location?.source?.homepage_url || '';
-    const pdfUrl = item?.open_access?.oa_url || '';
-
-    return {
-      source: 'openalex',
-      paperId,
-      title: item.display_name || 'Untitled',
-      abstract: recoverAbstract(item.abstract_inverted_index),
-      authors,
-      year: Number.isFinite(item.publication_year) ? item.publication_year : null,
-      venue: item?.primary_location?.source?.display_name || '',
-      url: primaryUrl || id,
-      pdfUrl,
-      citationCount: Number.isFinite(item.cited_by_count) ? item.cited_by_count : null,
-      referenceCount: Number.isFinite(item.referenced_works_count) ? item.referenced_works_count : null
-    };
-  });
 }
 
 function cacheLiteraturePapers(rows) {
