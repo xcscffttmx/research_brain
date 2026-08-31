@@ -1,8 +1,12 @@
 import { createAppError } from './errors.js';
 
 /**
- * 带超时的 fetch —— 保持与 mcp-server.js 原实现的行为完全一致，
- * 便于零风险迁移。P1-b 起将逐步过渡到 fetchWithRetry。
+ * 带超时的 fetch。
+ *
+ * 两点容易踩的坑，这里都处理了：
+ *   1. 调用方传入的 signal 不能被内部 controller 覆盖，否则外部取消失效 —— 用 AbortSignal.any 合并
+ *   2. 超时 abort 与调用方取消都表现为 AbortError，必须区分：
+ *      超时转成可重试的 UPSTREAM_TIMEOUT，取消则原样抛出，避免把用户的「停止」当成网络抖动去重试
  *
  * @param {string|URL} url
  * @param {RequestInit} [options]
@@ -11,11 +15,19 @@ import { createAppError } from './errors.js';
  */
 export async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, { ...options, signal });
   } catch (error) {
     if (error?.name === 'AbortError') {
+      if (!timedOut) throw error;
       throw createAppError('UPSTREAM_TIMEOUT', `上游请求超时（>${timeoutMs}ms）`, '请稍后重试或切换数据源。', 504);
     }
     throw error;

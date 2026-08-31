@@ -18,6 +18,16 @@ export const qwenConfig = {
     return process.env.QWEN_MODEL || 'qwen-plus';
   },
   get rerankModel() {
-    return process.env.QWEN_RERANK_MODEL || 'gte-rerank';
+    // gte-rerank 已下线，gte-rerank-v2 为其在原生 text-rerank 接口上的替代
+    return process.env.QWEN_RERANK_MODEL || 'gte-rerank-v2';
+  },
+  /**
+   * Reranker 走 DashScope 原生 text-rerank 接口。
+   * 兼容模式的 /reranks 并非所有账号都开放，实测返回 404，故固定用原生路径。
+   */
+  get rerankUrl() {
+    if (process.env.QWEN_RERANK_URL) return process.env.QWEN_RERANK_URL;
+    const nativeBase = this.baseUrl.replace(/\/compatible-mode\/v1$/, '/api/v1');
+    return `${nativeBase}/services/rerank/text-rerank/text-rerank`;
   }
 };
