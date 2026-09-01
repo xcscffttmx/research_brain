@@ -9,7 +9,6 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AgentTimeline: typeof import('./../components/AgentTimeline.vue')['default']
-    AsyncLoader: typeof import('./../components/AsyncLoader.vue')['default']
     ChatPanel: typeof import('./../components/ChatPanel.vue')['default']
     ComposerPanel: typeof import('./../components/ComposerPanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
@@ -26,15 +25,11 @@ declare module 'vue' {
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTag: typeof import('element-plus/es')['ElTag']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
-    EmptyState: typeof import('./../components/EmptyState.vue')['default']
     HomePage: typeof import('./../components/HomePage.vue')['default']
     KnowledgeBasePage: typeof import('./../components/KnowledgeBasePage.vue')['default']
-    KnowledgePanel: typeof import('./../components/KnowledgePanel.vue')['default']
     MessageCard: typeof import('./../components/MessageCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    SessionPanel: typeof import('./../components/SessionPanel.vue')['default']
-    SidebarPanel: typeof import('./../components/SidebarPanel.vue')['default']
     TopBar: typeof import('./../components/TopBar.vue')['default']
   }
 }
