@@ -9,6 +9,7 @@ import {
   uploadKnowledgeDocuments
 } from '@/services/qwen';
 import type { AgentPlan, ChatMessage, ChatSession, KnowledgeDocument, QwenMessage, ToolInvocation } from '@/types/chat';
+import { useRenderBuffer } from '@/composables/useRenderBuffer';
 
 const SESSION_STORAGE_KEY = 'research-agent-chat-sessions-v2';
 const ACTIVE_SESSION_KEY = 'research-agent-active-session-id-v2';
@@ -143,6 +144,9 @@ export const useChatStore = defineStore('chat', () => {
   const activeRunId = ref<string | null>(null);
   const activePlan = ref<AgentPlan | null>(null);
   const agentStage = ref('');
+  /** 当前流的渲染缓冲实例与上一轮的刷新统计（性能演示用） */
+  const renderBufferRef = ref<ReturnType<typeof useRenderBuffer> | null>(null);
+  const renderStats = ref<ReturnType<typeof useRenderBuffer>['stats'] | null>(null);
 
   const activeSession = computed(() => {
     return sessions.value.find((session) => session.id === activeConversationId.value) || sessions.value[0];
@@ -296,6 +300,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stopStreaming() {
+    // 先把缓冲里已收到的内容补出来，避免用户点停止后丢掉最后一小段
+    renderBufferRef.value?.flush();
+
     // 先显式通知服务端取消 run，再断开连接：让取消树能立刻回收在途工具调用
     if (activeRunId.value) {
       void abortAgentRun(activeRunId.value);
@@ -353,6 +360,13 @@ export const useChatStore = defineStore('chat', () => {
     activePlan.value = null;
     agentStage.value = '';
 
+    // 流式 token 先进缓冲队列，由 rAF 批量写回响应式状态，避免每个 token 触发一次渲染
+    const renderBuffer = useRenderBuffer((text) => {
+      assistantMessage.content += text;
+      touchActiveSession();
+    });
+    renderBufferRef.value = renderBuffer;
+
     try {
       await streamAgentChat(
         [
@@ -368,8 +382,7 @@ export const useChatStore = defineStore('chat', () => {
         ],
         (event) => {
           if (event.type === 'token' && event.token) {
-            assistantMessage.content += event.token;
-            touchActiveSession();
+            renderBuffer.push(event.token);
           }
 
           if (event.type === 'plan') {
@@ -395,6 +408,8 @@ export const useChatStore = defineStore('chat', () => {
           }
 
           if (event.type === 'error') {
+            // 报错要覆盖已渲染内容，先丢掉缓冲里未输出的 token
+            renderBuffer.reset();
             assistantMessage.status = 'error';
             assistantMessage.content = event.details ? `${event.message || '请求失败'}\n${event.details}` : event.message || '请求失败';
             errorMessage.value = assistantMessage.content;
@@ -402,6 +417,8 @@ export const useChatStore = defineStore('chat', () => {
           }
 
           if (event.type === 'done') {
+            // 结束时把缓冲里剩下的内容立刻补齐，不等下一帧
+            renderBuffer.flush();
             if (event.citations?.length) {
               assistantMessage.citations = event.citations;
             }
@@ -418,10 +435,15 @@ export const useChatStore = defineStore('chat', () => {
         activeSession.value.id
       );
 
+      renderBuffer.flush();
+      renderStats.value = renderBuffer.stats;
+
       if (!controller.signal.aborted && assistantMessage.status !== 'error') {
         assistantMessage.status = 'done';
       }
     } catch (error) {
+      renderBuffer.flush();
+
       if (controller.signal.aborted) {
         return;
       }
@@ -433,6 +455,7 @@ export const useChatStore = defineStore('chat', () => {
       if (abortController.value === controller) {
         abortController.value = null;
       }
+      renderBufferRef.value = null;
       activeRunId.value = null;
       agentStage.value = '';
       isResponding.value = false;
@@ -463,6 +486,7 @@ export const useChatStore = defineStore('chat', () => {
     ragEnabled,
     refreshDocuments,
     removeDocument,
+    renderStats,
     sendMessage,
     sessionList,
     sidebarOpen,

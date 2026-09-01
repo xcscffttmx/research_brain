@@ -50,8 +50,12 @@ async function scrollToBottom() {
   }
 }
 
+// 只观察最后一条消息：流式期间无需对整个列表做 O(n) 拼接比较
 watch(
-  () => props.messages.map((message) => `${message.id}:${message.content.length}:${message.status}`).join('|'),
+  () => {
+    const last = props.messages[props.messages.length - 1];
+    return last ? `${props.messages.length}:${last.id}:${last.content.length}:${last.status}` : '';
+  },
   () => {
     scrollToBottom();
   },
