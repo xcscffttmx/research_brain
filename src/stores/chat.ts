@@ -10,6 +10,7 @@ import {
 } from '@/services/qwen';
 import type { AgentPlan, ChatMessage, ChatSession, KnowledgeDocument, QwenMessage, ToolInvocation } from '@/types/chat';
 import { useRenderBuffer } from '@/composables/useRenderBuffer';
+import { useTypewriter } from '@/composables/useTypewriter';
 
 const SESSION_STORAGE_KEY = 'research-agent-chat-sessions-v2';
 const ACTIVE_SESSION_KEY = 'research-agent-active-session-id-v2';
@@ -144,7 +145,8 @@ export const useChatStore = defineStore('chat', () => {
   const activeRunId = ref<string | null>(null);
   const activePlan = ref<AgentPlan | null>(null);
   const agentStage = ref('');
-  /** 当前流的渲染缓冲实例与上一轮的刷新统计（性能演示用） */
+  /** 当前流的打字机与渲染缓冲实例，以及上一轮的刷新统计（性能演示用） */
+  const typewriterRef = ref<ReturnType<typeof useTypewriter> | null>(null);
   const renderBufferRef = ref<ReturnType<typeof useRenderBuffer> | null>(null);
   const renderStats = ref<ReturnType<typeof useRenderBuffer>['stats'] | null>(null);
 
@@ -300,7 +302,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stopStreaming() {
-    // 先把缓冲里已收到的内容补出来，避免用户点停止后丢掉最后一小段
+    // 先把打字机队列和缓冲里已收到的内容补出来，避免用户点停止后丢掉最后一小段
+    typewriterRef.value?.flush();
     renderBufferRef.value?.flush();
 
     // 先显式通知服务端取消 run，再断开连接：让取消树能立刻回收在途工具调用
@@ -360,12 +363,16 @@ export const useChatStore = defineStore('chat', () => {
     activePlan.value = null;
     agentStage.value = '';
 
-    // 流式 token 先进缓冲队列，由 rAF 批量写回响应式状态，避免每个 token 触发一次渲染
+    // 流式 token 先进缓冲队列，由 rAF 批量写回响应式状态，避免每个字符触发一次渲染
     const renderBuffer = useRenderBuffer((text) => {
       assistantMessage.content += text;
       touchActiveSession();
     });
     renderBufferRef.value = renderBuffer;
+
+    // 服务端会把多个 token 攒成一个 delta 下发，先拆成逐字输出再交给缓冲队列合并
+    const typewriter = useTypewriter((text) => renderBuffer.push(text));
+    typewriterRef.value = typewriter;
 
     try {
       await streamAgentChat(
@@ -382,7 +389,7 @@ export const useChatStore = defineStore('chat', () => {
         ],
         (event) => {
           if (event.type === 'token' && event.token) {
-            renderBuffer.push(event.token);
+            typewriter.push(event.token);
           }
 
           if (event.type === 'plan') {
@@ -408,7 +415,8 @@ export const useChatStore = defineStore('chat', () => {
           }
 
           if (event.type === 'error') {
-            // 报错要覆盖已渲染内容，先丢掉缓冲里未输出的 token
+            // 报错要覆盖已渲染内容，先丢掉打字机与缓冲里未输出的字符
+            typewriter.reset();
             renderBuffer.reset();
             assistantMessage.status = 'error';
             assistantMessage.content = event.details ? `${event.message || '请求失败'}\n${event.details}` : event.message || '请求失败';
@@ -417,7 +425,8 @@ export const useChatStore = defineStore('chat', () => {
           }
 
           if (event.type === 'done') {
-            // 结束时把缓冲里剩下的内容立刻补齐，不等下一帧
+            // 结束时把打字机与缓冲里剩下的内容立刻补齐，不等下一帧
+            typewriter.flush();
             renderBuffer.flush();
             if (event.citations?.length) {
               assistantMessage.citations = event.citations;
@@ -435,6 +444,7 @@ export const useChatStore = defineStore('chat', () => {
         activeSession.value.id
       );
 
+      typewriter.flush();
       renderBuffer.flush();
       renderStats.value = renderBuffer.stats;
 
@@ -442,6 +452,7 @@ export const useChatStore = defineStore('chat', () => {
         assistantMessage.status = 'done';
       }
     } catch (error) {
+      typewriter.flush();
       renderBuffer.flush();
 
       if (controller.signal.aborted) {
@@ -456,6 +467,7 @@ export const useChatStore = defineStore('chat', () => {
         abortController.value = null;
       }
       renderBufferRef.value = null;
+      typewriterRef.value = null;
       activeRunId.value = null;
       agentStage.value = '';
       isResponding.value = false;
