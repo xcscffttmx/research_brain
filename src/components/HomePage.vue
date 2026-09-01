@@ -19,10 +19,16 @@
         </div>
 
         <!-- 新对话按钮 -->
-        <button type="button" class="new-chat-btn" :disabled="store.isResponding" @click="handleNewChat">
+        <el-button
+          class="new-chat-btn"
+          type="primary"
+          size="large"
+          :disabled="store.isResponding"
+          @click="handleNewChat"
+        >
           <span class="new-chat-icon" aria-hidden="true">＋</span>
           <span>新对话</span>
-        </button>
+        </el-button>
 
         <!-- 导航菜单 -->
         <nav class="sidebar-nav-menu" aria-label="主导航">
@@ -65,7 +71,7 @@
           <div class="history-header">
             <span class="history-label">历史对话</span>
           </div>
-          <div class="history-list">
+          <el-scrollbar class="history-list">
             <div
               v-for="session in store.sessionList"
               :key="session.id"
@@ -80,21 +86,24 @@
                 </span>
                 <span class="history-item-title">{{ session.title || '新对话' }}</span>
               </button>
-              <button
-                type="button"
-                class="history-item-delete"
-                aria-label="删除会话"
-                @click.stop="store.deleteSession(session.id)"
+              <el-popconfirm
+                title="删除这个会话？删除后不可恢复。"
+                confirm-button-text="删除"
+                cancel-button-text="取消"
+                confirm-button-type="danger"
+                @confirm="store.deleteSession(session.id)"
               >
-                <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" />
-                </svg>
-              </button>
+                <template #reference>
+                  <button type="button" class="history-item-delete" aria-label="删除会话" @click.stop>
+                    <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                </template>
+              </el-popconfirm>
             </div>
-            <div v-if="store.sessionList.length === 0" class="history-empty">
-              <span>暂无历史对话</span>
-            </div>
-          </div>
+            <el-empty v-if="store.sessionList.length === 0" description="暂无历史对话" :image-size="48" />
+          </el-scrollbar>
         </div>
       </aside>
 
@@ -114,8 +123,22 @@
 
         <AsyncChatPanel :messages="store.messages" />
 
-        <div v-if="store.noticeMessage" class="notice-banner">{{ store.noticeMessage }}</div>
-        <div v-if="store.errorMessage" class="error-banner">{{ store.errorMessage }}</div>
+        <el-alert
+          v-if="store.noticeMessage"
+          class="notice-banner"
+          type="info"
+          :title="store.noticeMessage"
+          :closable="false"
+          show-icon
+        />
+        <el-alert
+          v-if="store.errorMessage"
+          class="error-banner"
+          type="error"
+          :title="store.errorMessage"
+          :closable="false"
+          show-icon
+        />
 
         <ComposerPanel
           v-model="store.input"
@@ -132,38 +155,23 @@
     </section>
 
     <!-- Agent 选择弹窗 -->
-    <div
-      v-if="showAgentPanel"
-      class="agent-modal"
-      role="presentation"
-      @click.self="showAgentPanel = false"
-    >
-      <div class="agent-modal-content" role="dialog" aria-modal="true" aria-labelledby="agent-modal-title">
-        <div class="agent-modal-header">
-          <h3 id="agent-modal-title">选择科研 Agent</h3>
-          <button type="button" class="agent-modal-close" aria-label="关闭" @click="showAgentPanel = false">
-            <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" />
-            </svg>
-          </button>
-        </div>
-        <div class="agent-modal-list">
-          <button
-            v-for="agent in agents"
-            :key="agent.id"
-            type="button"
-            class="agent-modal-item"
-            @click="selectAgent(agent.id)"
-          >
-            <div class="agent-modal-icon" aria-hidden="true">{{ agent.badge }}</div>
-            <div class="agent-modal-info">
-              <strong>{{ agent.name }}</strong>
-              <p>{{ agent.description }}</p>
-            </div>
-          </button>
-        </div>
+    <el-dialog v-model="showAgentPanel" title="选择科研 Agent" width="520px" align-center>
+      <div class="agent-modal-list">
+        <button
+          v-for="agent in agents"
+          :key="agent.id"
+          type="button"
+          class="agent-modal-item"
+          @click="selectAgent(agent.id)"
+        >
+          <div class="agent-modal-icon" aria-hidden="true">{{ agent.badge }}</div>
+          <div class="agent-modal-info">
+            <strong>{{ agent.name }}</strong>
+            <p>{{ agent.description }}</p>
+          </div>
+        </button>
       </div>
-    </div>
+    </el-dialog>
   </main>
 </template>
 

@@ -2,21 +2,32 @@
   <section class="composer-shell">
     <div class="composer-toolbar">
       <div class="composer-status-group">
-        <span class="status-badge">{{ ragEnabled ? 'RAG 已启用' : 'RAG 已关闭' }}</span>
-        <span class="status-badge soft">{{ documentCount }} 份文档</span>
+        <el-tag :type="ragEnabled ? 'primary' : 'info'" effect="light" round>
+          {{ ragEnabled ? 'RAG 已启用' : 'RAG 已关闭' }}
+        </el-tag>
+        <el-tag type="info" effect="plain" round>{{ documentCount }} 份文档</el-tag>
       </div>
       <div class="composer-toolbox">
-        <button class="tool-button" :class="[`voice-${voiceStatus}`]" :disabled="!voiceSupported" @click="$emit('voice')">
+        <el-button
+          :type="voiceStatus === 'recording' ? 'danger' : 'default'"
+          :disabled="!voiceSupported"
+          :loading="voiceStatus === 'processing'"
+          round
+          @click="$emit('voice')"
+        >
           {{ voiceButtonLabel }}
-        </button>
+        </el-button>
       </div>
     </div>
 
-    <textarea
-      :value="modelValue"
+    <el-input
+      :model-value="modelValue"
       class="composer-input"
+      type="textarea"
+      :autosize="{ minRows: 3, maxRows: 8 }"
+      resize="none"
       placeholder="问问 research-agent：请结合知识库总结当前项目的 RAG 与工具调用链路"
-      @input="$emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+      @update:model-value="$emit('update:modelValue', $event)"
       @keydown.enter.exact.prevent="$emit('submit')"
     />
 
@@ -25,9 +36,9 @@
         Enter 发送，Shift + Enter 换行
         <span v-if="voiceError"> · {{ voiceError }}</span>
       </p>
-      <button class="send-action" :disabled="disabled || !modelValue.trim()" @click="$emit('submit')">
+      <el-button type="primary" :loading="disabled" :disabled="disabled || !modelValue.trim()" @click="$emit('submit')">
         {{ disabled ? '思考中…' : '发送' }}
-      </button>
+      </el-button>
     </div>
   </section>
 </template>
