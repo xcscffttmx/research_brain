@@ -8,6 +8,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AgentTimeline: typeof import('./../components/AgentTimeline.vue')['default']
     AsyncLoader: typeof import('./../components/AsyncLoader.vue')['default']
     ChatPanel: typeof import('./../components/ChatPanel.vue')['default']
     ComposerPanel: typeof import('./../components/ComposerPanel.vue')['default']
@@ -20,6 +21,8 @@ declare module 'vue' {
     ElInput: typeof import('element-plus/es')['ElInput']
     ElPopconfirm: typeof import('element-plus/es')['ElPopconfirm']
     ElScrollbar: typeof import('element-plus/es')['ElScrollbar']
+    ElStep: typeof import('element-plus/es')['ElStep']
+    ElSteps: typeof import('element-plus/es')['ElSteps']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTag: typeof import('element-plus/es')['ElTag']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']

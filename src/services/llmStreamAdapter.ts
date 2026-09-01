@@ -79,6 +79,8 @@ export interface StreamDoneEvent {
   runId?: string;
   citations?: unknown[];
   tools?: unknown[];
+  /** groundedness 校验结果，仅在走了证据链路时存在 */
+  verification?: unknown;
 }
 
 /** done 事件允许的 reason 取值 */
@@ -315,7 +317,8 @@ export function normalizeFrame(event: string, data: string): StreamEvent | null 
         reason: DONE_REASONS.has(payload.reason) ? payload.reason : 'complete',
         runId: payload.runId,
         citations: payload.citations ?? [],
-        tools: payload.tools ?? []
+        tools: payload.tools ?? [],
+        verification: payload.verification
       };
     case 'ping':
       // 心跳只用于刷新 stall 计时，不向下游透出

@@ -121,6 +121,12 @@
           @toggle-rag="store.toggleRag"
         />
 
+        <AgentTimeline
+          :stage="store.agentStage"
+          :plan="store.activePlan"
+          :verification="store.answerVerification"
+        />
+
         <AsyncChatPanel :messages="store.messages" />
 
         <el-alert
@@ -179,6 +185,7 @@
 import { ref, defineAsyncComponent, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import ComposerPanel from '@/components/ComposerPanel.vue';
+import AgentTimeline from '@/components/AgentTimeline.vue';
 import TopBar from '@/components/TopBar.vue';
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition';
 import { useChatStore } from '@/stores/chat';

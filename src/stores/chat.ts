@@ -8,7 +8,7 @@ import {
   streamAgentChat,
   uploadKnowledgeDocuments
 } from '@/services/qwen';
-import type { AgentPlan, ChatMessage, ChatSession, KnowledgeDocument, QwenMessage, ToolInvocation } from '@/types/chat';
+import type { AgentPlan, AnswerVerification, ChatMessage, ChatSession, KnowledgeDocument, QwenMessage, ToolInvocation } from '@/types/chat';
 import { useRenderBuffer } from '@/composables/useRenderBuffer';
 import { useTypewriter } from '@/composables/useTypewriter';
 
@@ -145,6 +145,8 @@ export const useChatStore = defineStore('chat', () => {
   const activeRunId = ref<string | null>(null);
   const activePlan = ref<AgentPlan | null>(null);
   const agentStage = ref('');
+  /** 最近一轮回答的 groundedness 校验结果 */
+  const answerVerification = ref<AnswerVerification | null>(null);
   /** 当前流的打字机与渲染缓冲实例，以及上一轮的刷新统计（性能演示用） */
   const typewriterRef = ref<ReturnType<typeof useTypewriter> | null>(null);
   const renderBufferRef = ref<ReturnType<typeof useRenderBuffer> | null>(null);
@@ -362,6 +364,7 @@ export const useChatStore = defineStore('chat', () => {
     activeRunId.value = null;
     activePlan.value = null;
     agentStage.value = '';
+    answerVerification.value = null;
 
     // 流式 token 先进缓冲队列，由 rAF 批量写回响应式状态，避免每个字符触发一次渲染
     const renderBuffer = useRenderBuffer((text) => {
@@ -434,6 +437,9 @@ export const useChatStore = defineStore('chat', () => {
             if (event.tools?.length) {
               assistantMessage.tools = event.tools;
             }
+            if (event.verification) {
+              answerVerification.value = event.verification;
+            }
             if (assistantMessage.status !== 'error') {
               assistantMessage.status = 'done';
             }
@@ -478,6 +484,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     activeConversationId,
     activePlan,
+    answerVerification,
     activeRunId,
     activeSession,
     agentStage,

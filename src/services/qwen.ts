@@ -1,4 +1,5 @@
 import type {
+  AnswerVerification,
   ApiErrorPayload,
   BackendStreamEvent,
   Citation,
@@ -77,7 +78,8 @@ export async function streamAgentChat(
           type: 'done',
           reason: event.reason,
           citations: (event.citations || []) as Citation[],
-          tools: (event.tools || []) as ToolInvocation[]
+          tools: (event.tools || []) as ToolInvocation[],
+          verification: event.verification as AnswerVerification | undefined
         });
         break;
       default:

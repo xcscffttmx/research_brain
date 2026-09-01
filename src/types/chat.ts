@@ -55,6 +55,16 @@ export interface AgentPlan {
   steps: AgentPlanStep[];
 }
 
+/** 答案的 groundedness 校验结果（Agentic RAG 动态验证的产物） */
+export interface AnswerVerification {
+  grounded: boolean;
+  score: number;
+  unsupported: string[];
+  missingInfo: string;
+  /** 无证据可校验时为 true，此时 grounded 不代表校验通过 */
+  skipped?: boolean;
+}
+
 export interface BackendStreamEvent {
   type: 'token' | 'plan' | 'status' | 'tool' | 'citations' | 'done' | 'error';
   token?: string;
@@ -69,6 +79,7 @@ export interface BackendStreamEvent {
   plan?: AgentPlan;
   stage?: string;
   detail?: Record<string, unknown>;
+  verification?: AnswerVerification;
   reason?: 'complete' | 'interrupted' | 'aborted' | 'error';
 }
 
