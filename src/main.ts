@@ -5,6 +5,9 @@ import App from './App.vue';
 import HomePage from './components/HomePage.vue';
 import KnowledgeBasePage from './components/KnowledgeBasePage.vue';
 import './styles.css';
+// 先 EP 暗色变量，再 theme.css 做映射，顺序反了映射会被覆盖
+import 'element-plus/theme-chalk/dark/css-vars.css';
+import './theme.css';
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
 
 const app = createApp(App);
