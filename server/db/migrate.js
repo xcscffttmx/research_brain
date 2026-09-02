@@ -56,10 +56,7 @@ export function migrate({ verbose = true } = {}) {
     if (verbose) console.log(`应用迁移 v${migration.version}: ${migration.name}…`);
     const runInTx = db.transaction(() => {
       migration.up(db);
-      db.prepare('insert into schema_migrations(version, applied_at) values (?, ?)').run(
-        migration.version,
-        Date.now()
-      );
+      db.prepare('insert into schema_migrations(version, applied_at) values (?, ?)').run(migration.version, Date.now());
     });
     runInTx();
     applied.push(migration.version);

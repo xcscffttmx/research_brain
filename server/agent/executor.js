@@ -71,16 +71,7 @@ export function readPath(source, path) {
  * @param {object} [params.policy] 覆盖重试策略
  * @returns {Promise<{scratchpad: object, results: Array, failedSteps: Array}>}
  */
-export async function executePlan({
-  plan,
-  runId,
-  cancelNode,
-  callTool,
-  emit,
-  persist = true,
-  timeoutMs,
-  policy
-}) {
+export async function executePlan({ plan, runId, cancelNode, callTool, emit, persist = true, timeoutMs, policy }) {
   const scratchpad = {};
   const results = [];
   const failedSteps = [];

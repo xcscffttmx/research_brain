@@ -1,12 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createCancelRoot, CancelReason, CancelledError } from './cancelTree.js';
-import {
-  runWithPolicy,
-  withTimeout,
-  isRetryableError,
-  computeBackoff,
-  TOOL_TIMEOUTS
-} from './policy.js';
+import { runWithPolicy, withTimeout, isRetryableError, computeBackoff, TOOL_TIMEOUTS } from './policy.js';
 import { createAppError } from '../lib/errors.js';
 
 describe('isRetryableError', () => {
@@ -75,9 +69,7 @@ describe('withTimeout', () => {
     const root = createCancelRoot('run');
     const node = root.child('t');
 
-    await expect(
-      withTimeout(() => new Promise(() => {}), 30, node)
-    ).rejects.toMatchObject({ code: 'TOOL_TIMEOUT' });
+    await expect(withTimeout(() => new Promise(() => {}), 30, node)).rejects.toMatchObject({ code: 'TOOL_TIMEOUT' });
 
     expect(node.isCancelled).toBe(true);
     expect(node.reason.code).toBe(CancelReason.TIMEOUT);
@@ -136,9 +128,9 @@ describe('runWithPolicy 重试行为', () => {
       throw createAppError('INVALID_API_KEY', 'key 无效');
     });
 
-    await expect(
-      runWithPolicy({ toolName: 'search_knowledge', task, parentNode: root })
-    ).rejects.toMatchObject({ code: 'INVALID_API_KEY' });
+    await expect(runWithPolicy({ toolName: 'search_knowledge', task, parentNode: root })).rejects.toMatchObject({
+      code: 'INVALID_API_KEY'
+    });
 
     expect(task).toHaveBeenCalledTimes(1);
   });
@@ -191,9 +183,9 @@ describe('runWithPolicy 与取消树联动', () => {
     root.cancel(CancelReason.USER_ABORT);
     const task = vi.fn(async () => 'never');
 
-    await expect(
-      runWithPolicy({ toolName: 'search_knowledge', task, parentNode: root })
-    ).rejects.toBeInstanceOf(CancelledError);
+    await expect(runWithPolicy({ toolName: 'search_knowledge', task, parentNode: root })).rejects.toBeInstanceOf(
+      CancelledError
+    );
 
     expect(task).not.toHaveBeenCalled();
   });

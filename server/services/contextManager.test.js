@@ -8,15 +8,8 @@ const { migrate } = await import('../db/migrate.js');
 const { getDb } = await import('../db/client.js');
 const sessionRepo = await import('../repositories/sessionRepo.js');
 const messageRepo = await import('../repositories/messageRepo.js');
-const {
-  countTokens,
-  computeBudget,
-  selectShortTerm,
-  fitSummary,
-  compressHistory,
-  buildContext,
-  CONTEXT_CONSTANTS
-} = await import('./contextManager.js');
+const { countTokens, computeBudget, selectShortTerm, fitSummary, compressHistory, buildContext, CONTEXT_CONSTANTS } =
+  await import('./contextManager.js');
 
 function fakeQwen(text) {
   return vi.fn(async () => ({ choices: [{ message: { content: text } }] }));
@@ -212,7 +205,11 @@ describe('compressHistory', () => {
 describe('buildContext', () => {
   it('新会话没有历史时 contextHint 为空', async () => {
     const session = sessionRepo.createSession();
-    const result = await buildContext({ sessionId: session.id, question: '第一个问题', deps: { qwenFetch: fakeQwen('x') } });
+    const result = await buildContext({
+      sessionId: session.id,
+      question: '第一个问题',
+      deps: { qwenFetch: fakeQwen('x') }
+    });
 
     expect(result.contextHint).toBe('');
     expect(result.layers.shortTerm.count).toBe(0);

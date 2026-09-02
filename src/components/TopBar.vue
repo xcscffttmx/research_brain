@@ -2,7 +2,14 @@
   <header class="topbar-shell">
     <div class="topbar-left">
       <el-button class="desktop-hidden" text circle aria-label="打开侧边菜单" @click="$emit('menu')">
-        <svg class="icon-svg icon-svg--22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <svg
+          class="icon-svg icon-svg--22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
           <path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round" />
         </svg>
       </el-button>
@@ -14,7 +21,14 @@
 
     <div class="topbar-right">
       <el-button class="desktop-only-flex" text circle aria-label="展开侧边栏" @click="$emit('menu')">
-        <svg class="icon-svg icon-svg--22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <svg
+          class="icon-svg icon-svg--22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
           <path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round" />
         </svg>
       </el-button>
@@ -30,8 +44,20 @@
 
       <el-tooltip :content="isDark ? '切换到亮色主题' : '切换到暗色主题'" placement="bottom">
         <el-button text circle aria-label="切换主题" @click="toggle">
-          <svg class="icon-svg icon-svg--22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path v-if="isDark" d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" stroke-linecap="round" stroke-linejoin="round" />
+          <svg
+            class="icon-svg icon-svg--22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <path
+              v-if="isDark"
+              d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
             <template v-else>
               <circle cx="12" cy="12" r="4" />
               <path
@@ -72,6 +98,7 @@ defineEmits<{
 const { isDark, toggle } = useTheme();
 
 const titleText = computed(
-  () => `research-agent · 会话 ${props.conversationId.slice(0, 8)} · ${props.messageCount} 条消息 · ${props.documentCount} 份知识文档`
+  () =>
+    `research-agent · 会话 ${props.conversationId.slice(0, 8)} · ${props.messageCount} 条消息 · ${props.documentCount} 份知识文档`
 );
 </script>

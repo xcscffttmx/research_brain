@@ -17,14 +17,14 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: HomePage,
+      component: HomePage
     },
     {
       path: '/knowledge-base',
       name: 'knowledge-base',
-      component: KnowledgeBasePage,
-    },
-  ],
+      component: KnowledgeBasePage
+    }
+  ]
 });
 
 app.use(createPinia());

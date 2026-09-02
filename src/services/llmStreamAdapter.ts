@@ -8,15 +8,7 @@
  */
 
 /** 统一事件模型 */
-export type StreamEventType =
-  | 'delta'
-  | 'plan'
-  | 'tool_call'
-  | 'tool_result'
-  | 'status'
-  | 'usage'
-  | 'error'
-  | 'done';
+export type StreamEventType = 'delta' | 'plan' | 'tool_call' | 'tool_result' | 'status' | 'usage' | 'error' | 'done';
 
 export interface StreamDeltaEvent {
   type: 'delta';

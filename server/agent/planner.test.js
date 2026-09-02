@@ -90,7 +90,12 @@ describe('createPlan', () => {
         intent: '了解遥感分割最新进展',
         steps: [
           { step: 1, tool: 'retrieve_knowledge', args: { query: '遥感分割' }, reason: '先查个人知识库' },
-          { step: 2, tool: 'search_literature', args: { query: 'remote sensing segmentation', limit: 5 }, reason: '补充最新文献' }
+          {
+            step: 2,
+            tool: 'search_literature',
+            args: { query: 'remote sensing segmentation', limit: 5 },
+            reason: '补充最新文献'
+          }
         ],
         stopWhen: '两个来源都查完'
       })
@@ -109,9 +114,7 @@ describe('createPlan', () => {
   });
 
   it('闲聊场景产出 needsTools=false', async () => {
-    const qwenFetch = mockQwen(
-      JSON.stringify({ needsTools: false, intent: '闲聊', steps: [], stopWhen: '直接答' })
-    );
+    const qwenFetch = mockQwen(JSON.stringify({ needsTools: false, intent: '闲聊', steps: [], stopWhen: '直接答' }));
 
     const plan = await createPlan({
       question: '你好',
@@ -171,9 +174,9 @@ describe('createPlan', () => {
 
   it('模型输出乱码时抛解析错误', async () => {
     const qwenFetch = mockQwen('这不是 json');
-    await expect(
-      createPlan({ question: 'q', cancelNode: createCancelRoot('r'), qwenFetch })
-    ).rejects.toThrowError(/不含 JSON/);
+    await expect(createPlan({ question: 'q', cancelNode: createCancelRoot('r'), qwenFetch })).rejects.toThrowError(
+      /不含 JSON/
+    );
   });
 
   it('已取消时立刻抛 CancelledError，不调模型', async () => {
@@ -181,9 +184,7 @@ describe('createPlan', () => {
     root.cancel(CancelReason.USER_ABORT);
     const qwenFetch = mockQwen('{}');
 
-    await expect(
-      createPlan({ question: 'q', cancelNode: root, qwenFetch })
-    ).rejects.toBeInstanceOf(CancelledError);
+    await expect(createPlan({ question: 'q', cancelNode: root, qwenFetch })).rejects.toBeInstanceOf(CancelledError);
 
     expect(qwenFetch).not.toHaveBeenCalled();
   });

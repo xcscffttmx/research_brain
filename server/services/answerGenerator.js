@@ -1,6 +1,10 @@
 import { qwenStream, qwenFetch as defaultQwenFetch } from '../lib/apiClients/qwen.js';
 import { qwenConfig } from '../lib/config.js';
-import { buildEvidenceBlock, verifyGroundedness as defaultVerify, runAgenticRag as defaultRetrieveMore } from './agenticRag.js';
+import {
+  buildEvidenceBlock,
+  verifyGroundedness as defaultVerify,
+  runAgenticRag as defaultRetrieveMore
+} from './agenticRag.js';
 
 /**
  * 答案生成阶段 —— Agent Runtime 的最后一环。
@@ -23,7 +27,6 @@ const ANSWER_SYSTEM_PROMPT = [
   '5. 若提供了【检索证据】，每个来自证据的论断后面必须紧跟对应的 [^n] 角标，n 为证据编号；证据之外的内容不要加角标。'
 ].join('\n');
 
-
 /** 结果体积裁剪：保留结构信息，超长部分截断 */
 function stringifyResult(result) {
   const text = typeof result === 'string' ? result : JSON.stringify(result ?? null);
@@ -32,7 +35,14 @@ function stringifyResult(result) {
 }
 
 /** 把一轮执行的产物拼成生成阶段的 messages */
-export function buildAnswerMessages({ question, contextHint = '', plan, toolResults = [], failedSteps = [], citations = [] }) {
+export function buildAnswerMessages({
+  question,
+  contextHint = '',
+  plan,
+  toolResults = [],
+  failedSteps = [],
+  citations = []
+}) {
   const sections = [];
 
   if (contextHint) {

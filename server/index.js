@@ -148,7 +148,12 @@ app.get('/api/health', async (_, res) => {
     const [dbHealth, mcpResult] = await Promise.all([
       Promise.resolve()
         .then(() => checkDatabaseHealth())
-        .catch((error) => ({ enabled: true, ok: false, engine: 'sqlite', reason: error.message || 'database check failed' })),
+        .catch((error) => ({
+          enabled: true,
+          ok: false,
+          engine: 'sqlite',
+          reason: error.message || 'database check failed'
+        })),
       (async () => {
         const session = await createMcpSession();
         const result = await session.client.callTool({
@@ -212,7 +217,12 @@ app.get('/api/knowledge/content/:id', async (req, res) => {
 
     const structured = normalizeStructuredContent(result);
     if (result.isError) {
-      throw createAppError(structured.code || 'MCP_TOOL_ERROR', structured.message || '获取文档内容失败', structured.details || '', 400);
+      throw createAppError(
+        structured.code || 'MCP_TOOL_ERROR',
+        structured.message || '获取文档内容失败',
+        structured.details || '',
+        400
+      );
     }
 
     res.json(structured);
@@ -256,7 +266,12 @@ app.post('/api/knowledge/upload', upload.array('files'), async (req, res) => {
 
     const structured = normalizeStructuredContent(result);
     if (result.isError) {
-      throw createAppError(structured.code || 'MCP_TOOL_ERROR', structured.message || '知识库导入失败', structured.details || '', 400);
+      throw createAppError(
+        structured.code || 'MCP_TOOL_ERROR',
+        structured.message || '知识库导入失败',
+        structured.details || '',
+        400
+      );
     }
 
     res.json({
@@ -283,7 +298,12 @@ app.delete('/api/knowledge/:id', async (req, res) => {
 
     const structured = normalizeStructuredContent(result);
     if (result.isError) {
-      throw createAppError(structured.code || 'MCP_TOOL_ERROR', structured.message || '删除失败', structured.details || '', 400);
+      throw createAppError(
+        structured.code || 'MCP_TOOL_ERROR',
+        structured.message || '删除失败',
+        structured.details || '',
+        400
+      );
     }
 
     res.json({ ok: true });
@@ -307,7 +327,12 @@ app.delete('/api/knowledge', async (_, res) => {
 
     const structured = normalizeStructuredContent(result);
     if (result.isError) {
-      throw createAppError(structured.code || 'MCP_TOOL_ERROR', structured.message || '清空失败', structured.details || '', 400);
+      throw createAppError(
+        structured.code || 'MCP_TOOL_ERROR',
+        structured.message || '清空失败',
+        structured.details || '',
+        400
+      );
     }
 
     res.json({ ok: true });

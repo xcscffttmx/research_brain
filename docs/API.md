@@ -25,11 +25,11 @@
 
 项目当前主要使用三类接口格式：
 
-| 类型 | Content-Type | 适用场景 |
-|---|---|---|
-| 普通 JSON 接口 | `application/json` | 查询、分析、删除、生成等普通业务接口 |
-| 文件上传接口 | `multipart/form-data` | 知识库文件上传 |
-| SSE 流式接口 | `text/event-stream` | 聊天流式输出 |
+| 类型           | Content-Type          | 适用场景                             |
+| -------------- | --------------------- | ------------------------------------ |
+| 普通 JSON 接口 | `application/json`    | 查询、分析、删除、生成等普通业务接口 |
+| 文件上传接口   | `multipart/form-data` | 知识库文件上传                       |
+| SSE 流式接口   | `text/event-stream`   | 聊天流式输出                         |
 
 ### 统一错误响应
 
@@ -45,11 +45,11 @@
 
 字段说明：
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `error` | string | 是 | 面向用户或前端展示的错误说明 |
-| `code` | string | 否 | 业务错误码或上游错误码 |
-| `details` | string | 否 | 详细错误信息，通常用于排障 |
+| 字段      | 类型   | 必填 | 说明                         |
+| --------- | ------ | ---- | ---------------------------- |
+| `error`   | string | 是   | 面向用户或前端展示的错误说明 |
+| `code`    | string | 否   | 业务错误码或上游错误码       |
+| `details` | string | 否   | 详细错误信息，通常用于排障   |
 
 SSE 流式接口失败时，会通过 `event: error` 返回，格式见 `POST /api/chat/stream`。
 
@@ -117,16 +117,16 @@ Content-Type: application/json
 
 ### 请求参数
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `messages` | QwenMessage[] | 是 | 对话上下文消息列表 |
+| 字段       | 类型          | 必填 | 说明               |
+| ---------- | ------------- | ---- | ------------------ |
+| `messages` | QwenMessage[] | 是   | 对话上下文消息列表 |
 
 ### QwenMessage 结构
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `role` | string | 是 | 消息角色，可选：`system`、`user`、`assistant`、`tool` |
-| `content` | string | 是 | 消息内容 |
+| 字段      | 类型   | 必填 | 说明                                                  |
+| --------- | ------ | ---- | ----------------------------------------------------- |
+| `role`    | string | 是   | 消息角色，可选：`system`、`user`、`assistant`、`tool` |
+| `content` | string | 是   | 消息内容                                              |
 
 ### 请求示例
 
@@ -162,8 +162,8 @@ data: {"token":"你好"}
 
 字段说明：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
+| 字段    | 类型   | 说明             |
+| ------- | ------ | ---------------- |
 | `token` | string | 模型流式输出片段 |
 
 #### tool
@@ -184,13 +184,13 @@ data: {"id":"call_xxx","name":"search_literature","args":{"query":"remote sensin
 
 字段说明：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | string | 工具调用 ID |
-| `name` | string | 工具名称 |
-| `args` | object | 工具调用参数 |
+| 字段     | 类型   | 说明                                    |
+| -------- | ------ | --------------------------------------- |
+| `id`     | string | 工具调用 ID                             |
+| `name`   | string | 工具名称                                |
+| `args`   | object | 工具调用参数                            |
 | `status` | string | 工具状态：`running`、`success`、`error` |
-| `result` | object | 工具返回结果，成功或失败后可能存在 |
+| `result` | object | 工具返回结果，成功或失败后可能存在      |
 
 #### citations
 
@@ -203,13 +203,13 @@ data: {"citations":[{"id":"doc_1","title":"Paper Title","snippet":"引用片段"
 
 Citation 结构：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | string | 引用 ID |
-| `title` | string | 引用标题 |
-| `snippet` | string | 引用片段 |
-| `source` | string | 引用来源 |
-| `score` | number | 相似度或相关性分数，可选 |
+| 字段      | 类型   | 说明                     |
+| --------- | ------ | ------------------------ |
+| `id`      | string | 引用 ID                  |
+| `title`   | string | 引用标题                 |
+| `snippet` | string | 引用片段                 |
+| `source`  | string | 引用来源                 |
+| `score`   | number | 相似度或相关性分数，可选 |
 
 #### error
 
@@ -222,10 +222,10 @@ data: {"message":"服务异常","code":"UNKNOWN_ERROR","details":"具体错误�
 
 字段说明：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `message` | string | 错误说明 |
-| `code` | string | 错误码 |
+| 字段      | 类型   | 说明         |
+| --------- | ------ | ------------ |
+| `message` | string | 错误说明     |
+| `code`    | string | 错误码       |
 | `details` | string | 详细错误信息 |
 
 #### done
@@ -239,10 +239,10 @@ data: {"citations":[],"tools":[]}
 
 字段说明：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `citations` | Citation[] | 本轮对话收集到的引用 |
-| `tools` | ToolInvocation[] | 本轮对话调用过的工具列表 |
+| 字段        | 类型             | 说明                     |
+| ----------- | ---------------- | ------------------------ |
+| `citations` | Citation[]       | 本轮对话收集到的引用     |
+| `tools`     | ToolInvocation[] | 本轮对话调用过的工具列表 |
 
 ---
 
@@ -274,10 +274,10 @@ data: {"citations":[],"tools":[]}
 
 ### ServerDocumentResponse 结构
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | string | 文档 ID |
-| `name` | string | 文档名称 |
+| 字段        | 类型   | 说明                       |
+| ----------- | ------ | -------------------------- |
+| `id`        | string | 文档 ID                    |
+| `name`      | string | 文档名称                   |
 | `createdAt` | number | 创建时间戳，单位通常为毫秒 |
 
 ---
@@ -290,9 +290,9 @@ data: {"citations":[],"tools":[]}
 
 ### 路径参数
 
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `id` | string | 是 | 文档 ID |
+| 参数 | 类型   | 必填 | 说明    |
+| ---- | ------ | ---- | ------- |
+| `id` | string | 是   | 文档 ID |
 
 ### 响应示例
 
@@ -323,9 +323,9 @@ Content-Type: multipart/form-data
 
 ### FormData 参数
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `files` | File[] | 是 | 上传文件列表，支持多个同名字段 |
+| 字段    | 类型   | 必填 | 说明                           |
+| ------- | ------ | ---- | ------------------------------ |
+| `files` | File[] | 是   | 上传文件列表，支持多个同名字段 |
 
 ### 请求示例
 
@@ -359,9 +359,9 @@ files: paper2.docx
 
 ### 路径参数
 
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `id` | string | 是 | 文档 ID |
+| 参数 | 类型   | 必填 | 说明    |
+| ---- | ------ | ---- | ------- |
+| `id` | string | 是   | 文档 ID |
 
 ### 响应示例
 
@@ -409,13 +409,13 @@ Content-Type: application/json
 
 ### 请求参数
 
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `query` | string | 是 | - | 检索关键词，不能为空 |
-| `source` | string | 否 | `all` | 检索来源：`all`、`arxiv`、`semantic_scholar`、`openalex` |
-| `limit` | number | 否 | `6` | 返回数量 |
-| `sinceYear` | number | 否 | - | 起始年份 |
-| `untilYear` | number | 否 | - | 截止年份 |
+| 字段        | 类型   | 必填 | 默认值 | 说明                                                     |
+| ----------- | ------ | ---- | ------ | -------------------------------------------------------- |
+| `query`     | string | 是   | -      | 检索关键词，不能为空                                     |
+| `source`    | string | 否   | `all`  | 检索来源：`all`、`arxiv`、`semantic_scholar`、`openalex` |
+| `limit`     | number | 否   | `6`    | 返回数量                                                 |
+| `sinceYear` | number | 否   | -      | 起始年份                                                 |
+| `untilYear` | number | 否   | -      | 截止年份                                                 |
 
 ### 请求示例
 
@@ -459,19 +459,19 @@ Content-Type: application/json
 
 ### LiteraturePaper 结构
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `source` | string | 文献来源 |
-| `paperId` | string | 论文 ID |
-| `title` | string | 论文标题 |
-| `abstract` | string | 摘要 |
-| `authors` | string[] | 作者列表 |
-| `year` | number \| null | 发表年份 |
-| `venue` | string | 会议、期刊或平台 |
-| `url` | string | 论文页面链接 |
-| `pdfUrl` | string | PDF 链接 |
-| `citationCount` | number \| null | 引用数 |
-| `referenceCount` | number \| null | 参考文献数 |
+| 字段             | 类型           | 说明             |
+| ---------------- | -------------- | ---------------- |
+| `source`         | string         | 文献来源         |
+| `paperId`        | string         | 论文 ID          |
+| `title`          | string         | 论文标题         |
+| `abstract`       | string         | 摘要             |
+| `authors`        | string[]       | 作者列表         |
+| `year`           | number \| null | 发表年份         |
+| `venue`          | string         | 会议、期刊或平台 |
+| `url`            | string         | 论文页面链接     |
+| `pdfUrl`         | string         | PDF 链接         |
+| `citationCount`  | number \| null | 引用数           |
+| `referenceCount` | number \| null | 参考文献数       |
 
 ### 错误响应示例
 
@@ -499,9 +499,9 @@ Content-Type: application/json
 
 ### 请求参数
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `paperIds` | string[] | 是 | 需要入库的论文 ID 列表 |
+| 字段       | 类型     | 必填 | 说明                   |
+| ---------- | -------- | ---- | ---------------------- |
+| `paperIds` | string[] | 是   | 需要入库的论文 ID 列表 |
 
 ### 请求示例
 
@@ -542,9 +542,9 @@ Content-Type: application/json
 
 ### 请求参数
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `paperId` | string | 是 | 论文 ID，不能为空 |
+| 字段      | 类型   | 必填 | 说明              |
+| --------- | ------ | ---- | ----------------- |
+| `paperId` | string | 是   | 论文 ID，不能为空 |
 
 ### 请求示例
 
@@ -574,16 +574,16 @@ Content-Type: application/json
 
 ### PaperSchema 结构
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `title` | string | 论文标题 |
-| `problem` | string | 研究问题 |
-| `method` | string | 方法概述 |
-| `architecture` | string | 模型结构或系统架构 |
-| `dataset` | string[] | 使用的数据集 |
-| `metrics` | string[] | 评价指标 |
-| `conclusion` | string | 论文结论 |
-| `limitations` | string[] | 局限性 |
+| 字段           | 类型     | 说明               |
+| -------------- | -------- | ------------------ |
+| `title`        | string   | 论文标题           |
+| `problem`      | string   | 研究问题           |
+| `method`       | string   | 方法概述           |
+| `architecture` | string   | 模型结构或系统架构 |
+| `dataset`      | string[] | 使用的数据集       |
+| `metrics`      | string[] | 评价指标           |
+| `conclusion`   | string   | 论文结论           |
+| `limitations`  | string[] | 局限性             |
 
 ### 错误响应示例
 
@@ -611,9 +611,9 @@ Content-Type: application/json
 
 ### 请求参数
 
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `focus` | string | 否 | 空字符串 | 关注方向或研究主题 |
+| 字段    | 类型   | 必填 | 默认值   | 说明               |
+| ------- | ------ | ---- | -------- | ------------------ |
+| `focus` | string | 否   | 空字符串 | 关注方向或研究主题 |
 
 ### 请求示例
 
@@ -642,12 +642,12 @@ Content-Type: application/json
 
 ### ResearchGapOpportunity 结构
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `opportunity` | string | 研究机会或创新点 |
-| `rationale` | string | 推理依据 |
-| `supportingPaperIds` | string[] | 支撑该机会的论文 ID |
-| `confidence` | number | 置信度，通常为 0 到 1 |
+| 字段                 | 类型     | 说明                  |
+| -------------------- | -------- | --------------------- |
+| `opportunity`        | string   | 研究机会或创新点      |
+| `rationale`          | string   | 推理依据              |
+| `supportingPaperIds` | string[] | 支撑该机会的论文 ID   |
+| `confidence`         | number   | 置信度，通常为 0 到 1 |
 
 ---
 
@@ -665,10 +665,10 @@ Content-Type: application/json
 
 ### 请求参数
 
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `focus` | string | 否 | 空字符串 | 关注方向或研究主题 |
-| `gapIndex` | number | 否 | `0` | 选择第几个研究空白生成实验方案 |
+| 字段       | 类型   | 必填 | 默认值   | 说明                           |
+| ---------- | ------ | ---- | -------- | ------------------------------ |
+| `focus`    | string | 否   | 空字符串 | 关注方向或研究主题             |
+| `gapIndex` | number | 否   | `0`      | 选择第几个研究空白生成实验方案 |
 
 ### 请求示例
 
@@ -715,15 +715,15 @@ Content-Type: application/json
 
 ### ExperimentSpec 结构
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `baseline` | string | 基线方法 |
-| `proposed_change` | string | 拟改进方案 |
-| `dataset` | string | 实验数据集 |
-| `metrics` | string[] | 评价指标 |
-| `training_plan` | object | 训练计划 |
-| `ablation_plan` | string[] | 消融实验计划 |
-| `evidenceRefs` | object[] | 实验依据引用 |
+| 字段              | 类型     | 说明         |
+| ----------------- | -------- | ------------ |
+| `baseline`        | string   | 基线方法     |
+| `proposed_change` | string   | 拟改进方案   |
+| `dataset`         | string   | 实验数据集   |
+| `metrics`         | string[] | 评价指标     |
+| `training_plan`   | object   | 训练计划     |
+| `ablation_plan`   | string[] | 消融实验计划 |
+| `evidenceRefs`    | object[] | 实验依据引用 |
 
 ---
 

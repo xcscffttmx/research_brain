@@ -45,9 +45,7 @@
           <div class="source-title-line">
             <el-tag size="small" effect="dark" round>{{ index + 1 }}</el-tag>
             <strong>{{ citation.title }}</strong>
-            <el-tag v-if="citation.score" size="small" type="info" effect="plain">
-              相关度 {{ citation.score }}
-            </el-tag>
+            <el-tag v-if="citation.score" size="small" type="info" effect="plain"> 相关度 {{ citation.score }} </el-tag>
           </div>
           <p>{{ citation.snippet }}</p>
           <small>{{ citation.source }}</small>
@@ -74,7 +72,9 @@ const TOOL_TAG_TYPE: Record<ToolStatus, 'info' | 'primary' | 'success' | 'danger
   error: 'danger'
 };
 
-const html = computed(() => renderMarkdown(props.message.content || (props.message.status === 'streaming' ? '正在思考中…' : '')));
+const html = computed(() =>
+  renderMarkdown(props.message.content || (props.message.status === 'streaming' ? '正在思考中…' : ''))
+);
 const roleLabel = computed(() => (props.message.role === 'assistant' ? 'research-agent' : '你'));
 const avatar = computed(() => (props.message.role === 'assistant' ? '✦' : '你'));
 const timeLabel = computed(() =>

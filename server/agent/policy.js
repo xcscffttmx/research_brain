@@ -120,14 +120,7 @@ export async function withTimeout(task, timeoutMs, cancelNode) {
  * @param {(info: {attempt: number, error?: Error, delayMs?: number}) => void} [params.onAttempt]
  * @returns {Promise<{result: any, attempts: number, durationMs: number}>}
  */
-export async function runWithPolicy({
-  toolName,
-  task,
-  parentNode,
-  timeoutMs,
-  policy = {},
-  onAttempt
-}) {
+export async function runWithPolicy({ toolName, task, parentNode, timeoutMs, policy = {}, onAttempt }) {
   const merged = { ...DEFAULT_POLICY, ...policy };
   const effectiveTimeout = timeoutMs ?? TOOL_TIMEOUTS[toolName] ?? TOOL_TIMEOUTS.default;
   const startedAt = Date.now();

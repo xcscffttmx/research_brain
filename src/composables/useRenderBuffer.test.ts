@@ -118,7 +118,14 @@ describe('useRenderBuffer', () => {
       () => {
         injected += extraCost;
       },
-      { schedule: harness.schedule, cancel: harness.cancel, now, minFlushIntervalMs: 16, frameBudgetMs: 8, maxFlushIntervalMs: 64 }
+      {
+        schedule: harness.schedule,
+        cancel: harness.cancel,
+        now,
+        minFlushIntervalMs: 16,
+        frameBudgetMs: 8,
+        maxFlushIntervalMs: 64
+      }
     );
 
     buffer.push('a');

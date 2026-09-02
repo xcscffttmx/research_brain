@@ -19,7 +19,8 @@ function toStream(text, chunkSize = 8) {
   return {
     body: {
       getReader: () => ({
-        read: async () => (index < chunks.length ? { value: chunks[index++], done: false } : { value: undefined, done: true })
+        read: async () =>
+          index < chunks.length ? { value: chunks[index++], done: false } : { value: undefined, done: true }
       })
     }
   };
@@ -99,8 +100,22 @@ describe('consumeQwenStream', () => {
 describe('collectCitations', () => {
   it('跨工具去重合并 citations', () => {
     const citations = collectCitations([
-      { result: { citations: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }] } },
-      { result: { citations: [{ id: 'b', title: 'B' }, { id: 'c', title: 'C' }] } }
+      {
+        result: {
+          citations: [
+            { id: 'a', title: 'A' },
+            { id: 'b', title: 'B' }
+          ]
+        }
+      },
+      {
+        result: {
+          citations: [
+            { id: 'b', title: 'B' },
+            { id: 'c', title: 'C' }
+          ]
+        }
+      }
     ]);
     expect(citations.map((c) => c.id)).toEqual(['a', 'b', 'c']);
   });
@@ -204,7 +219,13 @@ describe('generateAnswerWithGroundedness', () => {
           onDelta?.(text);
           return text;
         },
-        verify: async () => ({ grounded: false, score: 0.2, unsupported: ['x'], missingInfo: '缺少实验数据', skipped: false }),
+        verify: async () => ({
+          grounded: false,
+          score: 0.2,
+          unsupported: ['x'],
+          missingInfo: '缺少实验数据',
+          skipped: false
+        }),
         retrieveMore: async () => ({ citations: [{ index: 1, title: 'b.md', snippet: '新证据', score: 0.7 }] })
       }
     });

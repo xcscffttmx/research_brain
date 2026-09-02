@@ -58,7 +58,9 @@ export function computeBudget(maxTokens = Number(process.env.CONTEXT_MAX_TOKENS)
 
 /** 消息转成注入文本的统一形状 */
 function renderMessage(message) {
-  const content = String(message.content || '').replace(/\s+/g, ' ').slice(0, MESSAGE_CHARS_LIMIT);
+  const content = String(message.content || '')
+    .replace(/\s+/g, ' ')
+    .slice(0, MESSAGE_CHARS_LIMIT);
   return `${message.role}: ${content}`;
 }
 
@@ -116,9 +118,7 @@ export async function compressHistory({
   signal,
   persist = true
 }) {
-  const pending = messageRepo
-    .listMessagesBefore(sessionId, beforeSeq)
-    .filter((message) => message.seq > summaryUpto);
+  const pending = messageRepo.listMessagesBefore(sessionId, beforeSeq).filter((message) => message.seq > summaryUpto);
 
   if (pending.length < COMPRESS_TRIGGER_MESSAGES) {
     return { summary: previousSummary, summaryUpto, compressed: false, reason: 'BELOW_TRIGGER' };

@@ -97,7 +97,11 @@ export async function planRetrieval({ question, contextHint = '', qwenFetch = de
           { role: 'system', content: RETRIEVAL_PLANNER_PROMPT },
           {
             role: 'user',
-            content: [contextHint ? `已有上下文摘要：\n${contextHint}` : '', `用户问题：\n${question}`, '请输出检索计划 JSON。']
+            content: [
+              contextHint ? `已有上下文摘要：\n${contextHint}` : '',
+              `用户问题：\n${question}`,
+              '请输出检索计划 JSON。'
+            ]
               .filter(Boolean)
               .join('\n\n')
           }
@@ -198,7 +202,11 @@ export async function retrieveOnce({
   }
 
   // 精排始终针对「用户原始问题」，而不是改写后的子问题
-  const { items: ranked, degraded, reason } = await rerank(
+  const {
+    items: ranked,
+    degraded,
+    reason
+  } = await rerank(
     question,
     recalled.map((item) => item.text),
     { topN, signal }
@@ -366,7 +374,9 @@ export async function planFollowUpQueries({ question, evidence, qwenFetch = defa
     );
 
     const parsed = extractJson(firstMessageContent(completion));
-    const queries = Array.isArray(parsed?.queries) ? parsed.queries.filter((q) => typeof q === 'string' && q.trim()) : [];
+    const queries = Array.isArray(parsed?.queries)
+      ? parsed.queries.filter((q) => typeof q === 'string' && q.trim())
+      : [];
     return queries.slice(0, 2);
   } catch (error) {
     if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;

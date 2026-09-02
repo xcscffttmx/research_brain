@@ -37,7 +37,9 @@ const verificationLabel = computed(() => {
   const verification = props.verification;
   if (!verification) return '';
   if (verification.skipped) return '未校验';
-  return verification.grounded ? `证据充分 ${verification.score.toFixed(2)}` : `证据不足 ${verification.score.toFixed(2)}`;
+  return verification.grounded
+    ? `证据充分 ${verification.score.toFixed(2)}`
+    : `证据不足 ${verification.score.toFixed(2)}`;
 });
 
 const verificationTagType = computed(() => {

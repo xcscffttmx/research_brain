@@ -162,14 +162,14 @@ Research Agent 是一个面向科研场景的多 Agent 小助手，目标是帮�
 
 ### 5.2 关键模块
 
-| 文件或目录 | 说明 |
-|---|---|
-| `src/main.ts` | 前端入口 |
-| `src/App.vue` | 应用根组件 |
-| `src/components/` | 页面和 UI 组件 |
-| `src/services/qwen.ts` | 后端 API 请求封装 |
-| `src/stores/chat.ts` | 聊天会话状态管理 |
-| `src/types/chat.ts` | 消息、引用、论文、实验方案等类型定义 |
+| 文件或目录             | 说明                                 |
+| ---------------------- | ------------------------------------ |
+| `src/main.ts`          | 前端入口                             |
+| `src/App.vue`          | 应用根组件                           |
+| `src/components/`      | 页面和 UI 组件                       |
+| `src/services/qwen.ts` | 后端 API 请求封装                    |
+| `src/stores/chat.ts`   | 聊天会话状态管理                     |
+| `src/types/chat.ts`    | 消息、引用、论文、实验方案等类型定义 |
 
 ### 5.3 前端扩展方向
 
@@ -395,18 +395,18 @@ search_literature
 
 ## 10. 外部依赖
 
-| 依赖 | 用途 |
-|---|---|
-| Qwen Chat API | 对话、工具调用编排 |
-| Qwen Embedding API | 文档向量化 |
-| arXiv | 学术文献检索 |
-| Semantic Scholar | 学术文献检索和引用信息 |
-| OpenAlex | 学术文献检索 |
-| PostgreSQL / Neon | 可选数据库健康检查和后续持久化扩展 |
-| S3 兼容对象存储 | 预留对象存储配置 |
-| pdf-parse | PDF 文档解析 |
-| mammoth | DOCX 文档解析 |
-| Zod | MCP 工具入参校验 |
+| 依赖               | 用途                               |
+| ------------------ | ---------------------------------- |
+| Qwen Chat API      | 对话、工具调用编排                 |
+| Qwen Embedding API | 文档向量化                         |
+| arXiv              | 学术文献检索                       |
+| Semantic Scholar   | 学术文献检索和引用信息             |
+| OpenAlex           | 学术文献检索                       |
+| PostgreSQL / Neon  | 可选数据库健康检查和后续持久化扩展 |
+| S3 兼容对象存储    | 预留对象存储配置                   |
+| pdf-parse          | PDF 文档解析                       |
+| mammoth            | DOCX 文档解析                      |
+| Zod                | MCP 工具入参校验                   |
 
 ## 11. 开发环境与生产环境差异
 

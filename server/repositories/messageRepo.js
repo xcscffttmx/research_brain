@@ -50,9 +50,7 @@ export function updateMessage(id, { content, tokenCount, status }) {
 
 /** 按 seq 升序列出会话全部消息 */
 export function listMessages(sessionId) {
-  return getDb()
-    .prepare('select * from messages where session_id = ? order by seq asc')
-    .all(sessionId);
+  return getDb().prepare('select * from messages where session_id = ? order by seq asc').all(sessionId);
 }
 
 /**

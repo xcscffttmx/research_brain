@@ -53,7 +53,12 @@ export async function streamAgentChat(
       case 'tool_call':
         onEvent({
           type: 'tool',
-          tool: { id: event.id, name: event.name, args: (event.args || {}) as Record<string, unknown>, status: 'running' }
+          tool: {
+            id: event.id,
+            name: event.name,
+            args: (event.args || {}) as Record<string, unknown>,
+            status: 'running'
+          }
         });
         break;
       case 'tool_result':
@@ -66,7 +71,11 @@ export async function streamAgentChat(
             status: TOOL_STATUS_MAP[event.status] ?? 'error',
             result:
               event.errorMsg ||
-              (typeof event.result === 'string' ? event.result : event.result ? JSON.stringify(event.result, null, 2) : undefined)
+              (typeof event.result === 'string'
+                ? event.result
+                : event.result
+                  ? JSON.stringify(event.result, null, 2)
+                  : undefined)
           }
         });
         break;
@@ -108,7 +117,9 @@ export async function fetchKnowledgeDocuments(): Promise<ServerDocumentResponse[
   return data.documents || [];
 }
 
-export async function fetchKnowledgeDocumentContent(id: string): Promise<{ id: string; name: string; content: string; createdAt: number }> {
+export async function fetchKnowledgeDocumentContent(
+  id: string
+): Promise<{ id: string; name: string; content: string; createdAt: number }> {
   const response = await fetch(`/api/knowledge/content/${id}`);
   const data = await response.json();
 

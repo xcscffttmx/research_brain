@@ -28,7 +28,12 @@ const MAX_DOCUMENT_CHARS = 2_000;
  */
 export async function rerankDocuments(query, documents, { topN, signal } = {}) {
   if (!qwenConfig.apiKey) {
-    throw createAppError('MISSING_API_KEY', '缺少 Qwen API Key', '请检查服务端 `.env.local` 中的 `QWEN_API_KEY` 配置。', 500);
+    throw createAppError(
+      'MISSING_API_KEY',
+      '缺少 Qwen API Key',
+      '请检查服务端 `.env.local` 中的 `QWEN_API_KEY` 配置。',
+      500
+    );
   }
 
   const candidates = documents.slice(0, MAX_DOCUMENTS).map((text) => String(text ?? '').slice(0, MAX_DOCUMENT_CHARS));
@@ -89,7 +94,11 @@ export async function rerankOrFallback(query, documents, options = {}) {
   } catch (error) {
     // 取消要向上传播，不能被降级逻辑吞掉
     if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;
-    return { items: keepOriginalOrder(documents, options.topN), degraded: true, reason: error?.code || 'RERANK_FAILED' };
+    return {
+      items: keepOriginalOrder(documents, options.topN),
+      degraded: true,
+      reason: error?.code || 'RERANK_FAILED'
+    };
   }
 }
 

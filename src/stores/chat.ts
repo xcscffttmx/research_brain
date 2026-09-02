@@ -8,7 +8,15 @@ import {
   streamAgentChat,
   uploadKnowledgeDocuments
 } from '@/services/qwen';
-import type { AgentPlan, AnswerVerification, ChatMessage, ChatSession, KnowledgeDocument, QwenMessage, ToolInvocation } from '@/types/chat';
+import type {
+  AgentPlan,
+  AnswerVerification,
+  ChatMessage,
+  ChatSession,
+  KnowledgeDocument,
+  QwenMessage,
+  ToolInvocation
+} from '@/types/chat';
 import { useRenderBuffer } from '@/composables/useRenderBuffer';
 import { useTypewriter } from '@/composables/useTypewriter';
 
@@ -42,7 +50,11 @@ function createSession(title = '新对话'): ChatSession {
     title,
     createdAt: now,
     updatedAt: now,
-    messages: [createInitialAssistantMessage('你好，我是你的 research-agent 助手。你可以直接提问，也可以先上传资料，让我通过后端向量检索结合工具调用来回答。')]
+    messages: [
+      createInitialAssistantMessage(
+        '你好，我是你的 research-agent 助手。你可以直接提问，也可以先上传资料，让我通过后端向量检索结合工具调用来回答。'
+      )
+    ]
   };
 }
 
@@ -105,9 +117,10 @@ function deserializeSessions() {
 
     const normalized = parsed.map((session) => {
       const title = typeof session.title === 'string' && session.title.trim() ? session.title : '新对话';
-      const messages = Array.isArray(session.messages) && session.messages.length
-        ? session.messages
-        : [createInitialAssistantMessage('你好，我是你的 research-agent 助手。')];
+      const messages =
+        Array.isArray(session.messages) && session.messages.length
+          ? session.messages
+          : [createInitialAssistantMessage('你好，我是你的 research-agent 助手。')];
 
       return {
         ...session,
@@ -158,9 +171,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = computed(() => activeSession.value.messages);
   const messageCount = computed(() => activeSession.value.messages.length);
   const documentCount = computed(() => documents.value.length);
-  const sessionList = computed(() =>
-    [...sessions.value].sort((a, b) => b.updatedAt - a.updatedAt)
-  );
+  const sessionList = computed(() => [...sessions.value].sort((a, b) => b.updatedAt - a.updatedAt));
 
   function persistSessions() {
     serializeSessions(sessions.value);
@@ -277,7 +288,9 @@ export const useChatStore = defineStore('chat', () => {
       return;
     }
 
-    activeSession.value.messages = [createInitialAssistantMessage('新的会话已开始。你可以继续提问，或者上传文件后让我使用向量知识库来辅助回答。')];
+    activeSession.value.messages = [
+      createInitialAssistantMessage('新的会话已开始。你可以继续提问，或者上传文件后让我使用向量知识库来辅助回答。')
+    ];
     activeSession.value.updatedAt = Date.now();
     activeSession.value.title = '新对话';
     input.value = '';
@@ -318,7 +331,9 @@ export const useChatStore = defineStore('chat', () => {
     abortController.value = null;
     isResponding.value = false;
 
-    const assistantMessage = [...activeSession.value.messages].reverse().find((message) => message.role === 'assistant' && message.status === 'streaming');
+    const assistantMessage = [...activeSession.value.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant' && message.status === 'streaming');
     if (assistantMessage) {
       assistantMessage.status = assistantMessage.content.trim() ? 'done' : 'error';
       if (!assistantMessage.content.trim()) {
@@ -422,7 +437,9 @@ export const useChatStore = defineStore('chat', () => {
             typewriter.reset();
             renderBuffer.reset();
             assistantMessage.status = 'error';
-            assistantMessage.content = event.details ? `${event.message || '请求失败'}\n${event.details}` : event.message || '请求失败';
+            assistantMessage.content = event.details
+              ? `${event.message || '请求失败'}\n${event.details}`
+              : event.message || '请求失败';
             errorMessage.value = assistantMessage.content;
             touchActiveSession();
           }

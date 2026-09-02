@@ -38,16 +38,12 @@ export function getSession(id) {
 
 /** 列出所有会话，最近更新的在前 */
 export function listSessions(limit = 50) {
-  return getDb()
-    .prepare('select * from sessions order by updated_at desc limit ?')
-    .all(limit);
+  return getDb().prepare('select * from sessions order by updated_at desc limit ?').all(limit);
 }
 
 /** 更新标题并刷新 updated_at */
 export function renameSession(id, title) {
-  getDb()
-    .prepare('update sessions set title = ?, updated_at = ? where id = ?')
-    .run(title, Date.now(), id);
+  getDb().prepare('update sessions set title = ?, updated_at = ? where id = ?').run(title, Date.now(), id);
   return getSession(id);
 }
 

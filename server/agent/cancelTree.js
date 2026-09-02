@@ -143,11 +143,7 @@ export function createCancelRoot(id, externalSignal) {
       const onAbort = () => root.cancel(CancelReason.USER_ABORT, 'external signal aborted');
       externalSignal.addEventListener('abort', onAbort, { once: true });
       // 根节点取消后解绑监听，避免外部 signal 长期持有引用
-      root.signal.addEventListener(
-        'abort',
-        () => externalSignal.removeEventListener('abort', onAbort),
-        { once: true }
-      );
+      root.signal.addEventListener('abort', () => externalSignal.removeEventListener('abort', onAbort), { once: true });
     }
   }
 

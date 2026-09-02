@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  parseSseFrame,
-  normalizeFrame,
-  OutputGate,
-  consumeSseStream,
-  type StreamEvent
-} from './llmStreamAdapter';
+import { parseSseFrame, normalizeFrame, OutputGate, consumeSseStream, type StreamEvent } from './llmStreamAdapter';
 
 // ---------- 测试工具 ----------
 
@@ -341,10 +335,7 @@ describe('Gate 集成行为', () => {
 
 describe('Gate 统计', () => {
   it('统计接收帧数与各类丢弃数', async () => {
-    const payload =
-      frame(1, 'delta', { text: 'a' }) +
-      frame(1, 'delta', { text: 'replay' }) +
-      frame(2, 'done', {});
+    const payload = frame(1, 'delta', { text: 'a' }) + frame(1, 'delta', { text: 'replay' }) + frame(2, 'done', {});
     const { stats } = await collect(streamFromChunks([new TextEncoder().encode(payload)]));
     expect(stats?.receivedFrames).toBe(3);
     expect(stats?.droppedOutOfOrder).toBe(1);

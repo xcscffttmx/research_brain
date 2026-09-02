@@ -46,18 +46,13 @@ export function upsertPapers(papers) {
 
 /** 按 paperId 查（不限来源，取最近缓存的一条） */
 export function findPaper(paperId) {
-  const row = getDb()
-    .prepare('select * from papers where paper_id = ? order by cached_at desc limit 1')
-    .get(paperId);
+  const row = getDb().prepare('select * from papers where paper_id = ? order by cached_at desc limit 1').get(paperId);
   return row ? toPaper(row) : null;
 }
 
 /** 列出缓存的文献 */
 export function listPapers(limit = 100) {
-  return getDb()
-    .prepare('select * from papers order by cached_at desc limit ?')
-    .all(limit)
-    .map(toPaper);
+  return getDb().prepare('select * from papers order by cached_at desc limit ?').all(limit).map(toPaper);
 }
 
 // ---------- paper_schemas ----------

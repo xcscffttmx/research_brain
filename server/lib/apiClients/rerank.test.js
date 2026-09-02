@@ -63,7 +63,14 @@ describe('rerankDocuments', () => {
 
   it('过滤越界与非法 index', async () => {
     globalThis.fetch = vi.fn(async () =>
-      mockResponse({ output: { results: [{ index: 99, relevance_score: 1 }, { index: 1, relevance_score: 0.2 }] } })
+      mockResponse({
+        output: {
+          results: [
+            { index: 99, relevance_score: 1 },
+            { index: 1, relevance_score: 0.2 }
+          ]
+        }
+      })
     );
     expect(await rerankDocuments('q', DOCS)).toEqual([{ index: 1, score: 0.2 }]);
   });

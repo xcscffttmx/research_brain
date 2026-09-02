@@ -115,15 +115,18 @@ describe('流式渲染频率基准', () => {
     const bufferedClock = createReplayClock();
     const buffered = createRenderProfiler(`Buffer + rAF（${source}）`, bufferedClock.now);
     let renderedText = '';
-    const renderBuffer = useRenderBuffer((text) => {
-      renderedText += text;
-      buffered.mark();
-    }, {
-      schedule: bufferedClock.schedule,
-      cancel: bufferedClock.cancel,
-      now: bufferedClock.now,
-      minFlushIntervalMs: 24
-    });
+    const renderBuffer = useRenderBuffer(
+      (text) => {
+        renderedText += text;
+        buffered.mark();
+      },
+      {
+        schedule: bufferedClock.schedule,
+        cancel: bufferedClock.cancel,
+        now: bufferedClock.now,
+        minFlushIntervalMs: 24
+      }
+    );
     const bufferedTypewriter = useTypewriter((text) => renderBuffer.push(text), {
       schedule: bufferedClock.schedule,
       cancel: bufferedClock.cancel,

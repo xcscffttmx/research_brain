@@ -33,10 +33,13 @@ function makeDeps({ rows = [], rerankResult } = {}) {
   return {
     createEmbedding: vi.fn(async () => [0.1, 0.2, 0.3]),
     searchChunksByVector: vi.fn(() => rows),
-    rerank: vi.fn(async (_q, documents, { topN }) => rerankResult ?? {
-      items: documents.map((_, index) => ({ index, score: 0.9 - index * 0.1 })).slice(0, topN),
-      degraded: false
-    })
+    rerank: vi.fn(
+      async (_q, documents, { topN }) =>
+        rerankResult ?? {
+          items: documents.map((_, index) => ({ index, score: 0.9 - index * 0.1 })).slice(0, topN),
+          degraded: false
+        }
+    )
   };
 }
 
@@ -52,7 +55,9 @@ describe('planRetrieval', () => {
   it('解析模型给出的检索计划', async () => {
     const plan = await planRetrieval({
       question: 'RAG 和 reranker 的关系',
-      qwenFetch: fakeQwen('{"needsRetrieval":true,"queries":["向量检索原理","重排序模型作用"],"maxHops":2,"reason":"多方面"}')
+      qwenFetch: fakeQwen(
+        '{"needsRetrieval":true,"queries":["向量检索原理","重排序模型作用"],"maxHops":2,"reason":"多方面"}'
+      )
     });
 
     expect(plan.needsRetrieval).toBe(true);
@@ -228,7 +233,8 @@ describe('runAgenticRag', () => {
     deps.qwenFetch = vi.fn(async () => {
       call += 1;
       // 第 1 次是检索规划，第 2 次是补充检索规划
-      const content = call === 1 ? '{"needsRetrieval":true,"queries":["q1"],"maxHops":2,"reason":""}' : '{"queries":["q2"]}';
+      const content =
+        call === 1 ? '{"needsRetrieval":true,"queries":["q1"],"maxHops":2,"reason":""}' : '{"queries":["q2"]}';
       return { choices: [{ message: { content } }] };
     });
 
@@ -240,11 +246,15 @@ describe('runAgenticRag', () => {
   });
 
   it('补充检索无子问题时提前结束', async () => {
-    const deps = makeDeps({ rows: [row('c1', 0.3)], rerankResult: { items: [{ index: 0, score: 0.01 }], degraded: false } });
+    const deps = makeDeps({
+      rows: [row('c1', 0.3)],
+      rerankResult: { items: [{ index: 0, score: 0.01 }], degraded: false }
+    });
     let call = 0;
     deps.qwenFetch = vi.fn(async () => {
       call += 1;
-      const content = call === 1 ? '{"needsRetrieval":true,"queries":["q1"],"maxHops":3,"reason":""}' : '{"queries":[]}';
+      const content =
+        call === 1 ? '{"needsRetrieval":true,"queries":["q1"],"maxHops":3,"reason":""}' : '{"queries":[]}';
       return { choices: [{ message: { content } }] };
     });
 
@@ -274,7 +284,12 @@ describe('runAgenticRag', () => {
     };
 
     await expect(
-      runAgenticRag({ question: 'q', cancelNode, persist: false, deps: { ...makeDeps(), qwenFetch: fakeQwen(planText) } })
+      runAgenticRag({
+        question: 'q',
+        cancelNode,
+        persist: false,
+        deps: { ...makeDeps(), qwenFetch: fakeQwen(planText) }
+      })
     ).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 });
@@ -290,7 +305,9 @@ describe('planFollowUpQueries', () => {
   });
 
   it('过滤空字符串并容忍非法结构', async () => {
-    expect(await planFollowUpQueries({ question: 'q', evidence: [], qwenFetch: fakeQwen('{"queries":["  ","x"]}') })).toEqual(['x']);
+    expect(
+      await planFollowUpQueries({ question: 'q', evidence: [], qwenFetch: fakeQwen('{"queries":["  ","x"]}') })
+    ).toEqual(['x']);
     expect(await planFollowUpQueries({ question: 'q', evidence: [], qwenFetch: fakeQwen('不是 JSON') })).toEqual([]);
   });
 });
@@ -317,7 +334,9 @@ describe('buildCitations / buildEvidenceBlock', () => {
   });
 
   it('证据块带 [^n] 标记，空列表返回空串', () => {
-    const block = buildEvidenceBlock(buildCitations([{ chunkId: 'c1', documentName: 'a.md', text: '正文', vectorScore: 0.5 }]));
+    const block = buildEvidenceBlock(
+      buildCitations([{ chunkId: 'c1', documentName: 'a.md', text: '正文', vectorScore: 0.5 }])
+    );
     expect(block).toContain('[^1]');
     expect(block).toContain('a.md');
     expect(buildEvidenceBlock([])).toBe('');
@@ -340,7 +359,10 @@ describe('verifyGroundedness', () => {
 
   it('没有答案或没有证据时跳过核查', async () => {
     const qwenFetch = fakeQwen('{}');
-    expect(await verifyGroundedness({ answer: '   ', citations, qwenFetch })).toMatchObject({ skipped: true, grounded: true });
+    expect(await verifyGroundedness({ answer: '   ', citations, qwenFetch })).toMatchObject({
+      skipped: true,
+      grounded: true
+    });
     expect(await verifyGroundedness({ answer: 'a', citations: [], qwenFetch })).toMatchObject({ skipped: true });
     expect(qwenFetch).not.toHaveBeenCalled();
   });

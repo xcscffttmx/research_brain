@@ -57,9 +57,7 @@ export async function searchOpenAlex(query, limit = 5) {
     const id = typeof item.id === 'string' ? item.id : '';
     const paperId = id ? id.split('/').pop() : uid('openalex');
     const authors = Array.isArray(item.authorships)
-      ? item.authorships
-          .map((auth) => auth?.author?.display_name)
-          .filter(Boolean)
+      ? item.authorships.map((auth) => auth?.author?.display_name).filter(Boolean)
       : [];
 
     const primaryUrl = item?.primary_location?.landing_page_url || item?.primary_location?.source?.homepage_url || '';

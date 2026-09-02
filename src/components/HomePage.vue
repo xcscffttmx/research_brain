@@ -36,7 +36,11 @@
             <span class="nav-menu-icon" aria-hidden="true">
               <svg class="icon-svg icon-svg--22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 19.5A2.5 2.5 0 016.5 17H20" stroke-linecap="round" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" stroke-linecap="round" stroke-linejoin="round" />
+                <path
+                  d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </span>
             <span>向量知识库</span>
@@ -58,7 +62,10 @@
             <span class="nav-menu-icon" aria-hidden="true">
               <svg class="icon-svg icon-svg--22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3" />
-                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke-linecap="round" />
+                <path
+                  d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+                  stroke-linecap="round"
+                />
               </svg>
             </span>
             <span>更多</span>
@@ -80,7 +87,13 @@
             >
               <button type="button" class="history-item-main" @click="store.switchSession(session.id)">
                 <span class="history-item-icon" aria-hidden="true">
-                  <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <svg
+                    class="icon-svg icon-svg--20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
                     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke-linejoin="round" />
                   </svg>
                 </span>
@@ -95,7 +108,14 @@
               >
                 <template #reference>
                   <button type="button" class="history-item-delete" aria-label="删除会话" @click.stop>
-                    <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <svg
+                      class="icon-svg icon-svg--20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
                       <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" />
                     </svg>
                   </button>
@@ -121,11 +141,7 @@
           @toggle-rag="store.toggleRag"
         />
 
-        <AgentTimeline
-          :stage="store.agentStage"
-          :plan="store.activePlan"
-          :verification="store.answerVerification"
-        />
+        <AgentTimeline :stage="store.agentStage" :plan="store.activePlan" :verification="store.answerVerification" />
 
         <AsyncChatPanel :messages="store.messages" />
 
@@ -249,7 +265,7 @@ function toggleAgentPanel() {
 }
 
 function selectAgent(agentId: string) {
-  const agent = agents.find(a => a.id === agentId);
+  const agent = agents.find((a) => a.id === agentId);
   if (agent) {
     store.appendInput(`请使用 ${agent.name} 来帮助我`);
   }

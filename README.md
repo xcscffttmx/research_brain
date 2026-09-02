@@ -154,22 +154,22 @@ npm run build
 
 ## 环境变量
 
-| 变量名 | 必填 | 说明 | 默认值 |
-|---|---|---|---|
-| `QWEN_API_KEY` | 是 | Qwen API Key | - |
-| `QWEN_BASE_URL` | 否 | Qwen 兼容接口地址 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `QWEN_MODEL` | 否 | 对话模型 | `qwen-plus` |
-| `QWEN_EMBEDDING_MODEL` | 否 | 向量模型 | `text-embedding-v3` |
-| `SERVER_PORT` | 否 | 服务端口 | `8788` |
-| `SEMANTIC_SCHOLAR_API_KEY` | 否 | S2 API Key（建议配置） | - |
-| `DATABASE_URL` | 建议 | PostgreSQL 连接串（Neon） | - |
-| `OBJECT_STORAGE_PROVIDER` | 否 | 对象存储提供商（S3兼容） | `s3` |
-| `OBJECT_STORAGE_ENDPOINT` | 否 | 对象存储 Endpoint | - |
-| `OBJECT_STORAGE_REGION` | 否 | 对象存储区域 | `auto` |
-| `OBJECT_STORAGE_ACCESS_KEY` | 否 | 对象存储 Access Key | - |
-| `OBJECT_STORAGE_SECRET_KEY` | 否 | 对象存储 Secret Key | - |
-| `OBJECT_STORAGE_BUCKET` | 否 | 对象存储 Bucket 名称 | `research-docs` |
-| `OBJECT_STORAGE_FORCE_PATH_STYLE` | 否 | S3 Path Style | `true` |
+| 变量名                            | 必填 | 说明                      | 默认值                                              |
+| --------------------------------- | ---- | ------------------------- | --------------------------------------------------- |
+| `QWEN_API_KEY`                    | 是   | Qwen API Key              | -                                                   |
+| `QWEN_BASE_URL`                   | 否   | Qwen 兼容接口地址         | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `QWEN_MODEL`                      | 否   | 对话模型                  | `qwen-plus`                                         |
+| `QWEN_EMBEDDING_MODEL`            | 否   | 向量模型                  | `text-embedding-v3`                                 |
+| `SERVER_PORT`                     | 否   | 服务端口                  | `8788`                                              |
+| `SEMANTIC_SCHOLAR_API_KEY`        | 否   | S2 API Key（建议配置）    | -                                                   |
+| `DATABASE_URL`                    | 建议 | PostgreSQL 连接串（Neon） | -                                                   |
+| `OBJECT_STORAGE_PROVIDER`         | 否   | 对象存储提供商（S3兼容）  | `s3`                                                |
+| `OBJECT_STORAGE_ENDPOINT`         | 否   | 对象存储 Endpoint         | -                                                   |
+| `OBJECT_STORAGE_REGION`           | 否   | 对象存储区域              | `auto`                                              |
+| `OBJECT_STORAGE_ACCESS_KEY`       | 否   | 对象存储 Access Key       | -                                                   |
+| `OBJECT_STORAGE_SECRET_KEY`       | 否   | 对象存储 Secret Key       | -                                                   |
+| `OBJECT_STORAGE_BUCKET`           | 否   | 对象存储 Bucket 名称      | `research-docs`                                     |
+| `OBJECT_STORAGE_FORCE_PATH_STYLE` | 否   | S3 Path Style             | `true`                                              |
 
 ---
 

@@ -1,10 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import {
-  CancelNode,
-  CancelReason,
-  CancelledError,
-  createCancelRoot
-} from './cancelTree.js';
+import { CancelNode, CancelReason, CancelledError, createCancelRoot } from './cancelTree.js';
 
 describe('取消树基础结构', () => {
   it('根节点初始未取消', () => {

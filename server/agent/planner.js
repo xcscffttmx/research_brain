@@ -27,7 +27,13 @@ export const TOOL_CATALOG = [
     name: 'search_literature',
     description: '在线检索 arXiv / Semantic Scholar / OpenAlex 学术文献',
     whenToUse: '需要最新研究进展、或知识库中没有相关内容时',
-    args: { query: 'string', source: 'all|arxiv|semantic_scholar|openalex?', limit: 'number?', sinceYear: 'number?', untilYear: 'number?' }
+    args: {
+      query: 'string',
+      source: 'all|arxiv|semantic_scholar|openalex?',
+      limit: 'number?',
+      sinceYear: 'number?',
+      untilYear: 'number?'
+    }
   },
   {
     name: 'summarize_literature',
@@ -103,8 +109,7 @@ const PLANNER_SYSTEM_PROMPT = `你是科研问答 Agent 的规划器。你的任
 
 function buildToolCatalogText() {
   return TOOL_CATALOG.map(
-    (t) =>
-      `- ${t.name}: ${t.description}\n  使用时机: ${t.whenToUse}\n  参数: ${JSON.stringify(t.args)}`
+    (t) => `- ${t.name}: ${t.description}\n  使用时机: ${t.whenToUse}\n  参数: ${JSON.stringify(t.args)}`
   ).join('\n');
 }
 

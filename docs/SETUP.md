@@ -6,12 +6,12 @@
 
 建议使用以下环境：
 
-| 工具 | 建议版本 | 说明 |
-|---|---|---|
-| Node.js | 18+，推荐 20+ | 项目使用原生 `fetch`、ESM 和 Vite |
-| npm | 随 Node.js 安装 | 用于安装依赖和运行脚本 |
-| Git | 最新稳定版 | 拉取代码和版本管理 |
-| Docker | 可选 | 用于容器化部署验证 |
+| 工具    | 建议版本        | 说明                              |
+| ------- | --------------- | --------------------------------- |
+| Node.js | 18+，推荐 20+   | 项目使用原生 `fetch`、ESM 和 Vite |
+| npm     | 随 Node.js 安装 | 用于安装依赖和运行脚本            |
+| Git     | 最新稳定版      | 拉取代码和版本管理                |
+| Docker  | 可选            | 用于容器化部署验证                |
 
 Windows 环境建议使用 PowerShell、Windows Terminal 或 Cursor 内置终端。
 
@@ -70,10 +70,10 @@ npm run dev
 
 默认访问地址：
 
-| 服务 | 地址 |
-|---|---|
-| 前端 | `http://localhost:5173` |
-| 后端 | `http://127.0.0.1:8788` |
+| 服务     | 地址                               |
+| -------- | ---------------------------------- |
+| 前端     | `http://localhost:5173`            |
+| 后端     | `http://127.0.0.1:8788`            |
 | 健康检查 | `http://127.0.0.1:8788/api/health` |
 
 ## 单独启动服务
@@ -152,13 +152,13 @@ npm run preview
 
 ## 常用脚本
 
-| 命令 | 说明 |
-|---|---|
-| `npm run dev` | 并行启动前端和后端 |
-| `npm run dev:client` | 仅启动 Vite 前端开发服务 |
-| `npm run dev:server` | 仅启动 Express 后端服务 |
-| `npm run build` | TypeScript 检查并构建前端产物 |
-| `npm run preview` | 本地预览前端构建产物 |
+| 命令                 | 说明                          |
+| -------------------- | ----------------------------- |
+| `npm run dev`        | 并行启动前端和后端            |
+| `npm run dev:client` | 仅启动 Vite 前端开发服务      |
+| `npm run dev:server` | 仅启动 Express 后端服务       |
+| `npm run build`      | TypeScript 检查并构建前端产物 |
+| `npm run preview`    | 本地预览前端构建产物          |
 
 ## 本地开发注意事项
 

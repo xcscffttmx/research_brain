@@ -74,7 +74,13 @@ function main() {
 
   const chunkIds = chunkRepo.insertChunksWithVectors(doc.id, [
     { text: 'ViT 在遥感分割中的应用综述。', embedding: makeEmbedding(0), tokenCount: 20, spanStart: 0, spanEnd: 100 },
-    { text: 'CNN 与 Transformer 的混合架构。', embedding: makeEmbedding(1), tokenCount: 22, spanStart: 100, spanEnd: 220 },
+    {
+      text: 'CNN 与 Transformer 的混合架构。',
+      embedding: makeEmbedding(1),
+      tokenCount: 22,
+      spanStart: 100,
+      spanEnd: 220
+    },
     { text: '数据增强对小样本分割的影响。', embedding: makeEmbedding(2), tokenCount: 19, spanStart: 220, spanEnd: 340 }
   ]);
   check('批量写入 3 个分块+向量', chunkIds.length === 3);
@@ -83,11 +89,7 @@ function main() {
   // 用与第 2 个分块完全同向的向量查询，期望它排第一且相似度接近 1
   const hits = chunkRepo.searchChunksByVector(makeEmbedding(1), 3);
   check('向量检索返回结果', hits.length === 3, `got ${hits.length}`);
-  check(
-    '最相似的是第 2 个分块',
-    hits[0]?.text === 'CNN 与 Transformer 的混合架构。',
-    `got "${hits[0]?.text}"`
-  );
+  check('最相似的是第 2 个分块', hits[0]?.text === 'CNN 与 Transformer 的混合架构。', `got "${hits[0]?.text}"`);
   check('相似度接近 1', Math.abs(hits[0].score - 1) < 1e-5, `got ${hits[0]?.score}`);
   check('携带原文 span 信息', hits[0].spanStart === 100 && hits[0].spanEnd === 220);
   check('携带文档名', hits[0].documentName === 'survey.md');
@@ -129,7 +131,7 @@ function main() {
   const evIds = evidenceRepo.recordEvidence(run.id, 1, [
     { chunkId: chunkIds[1], snippet: 'CNN 与 Transformer 的混合架构。', vectorScore: 0.98, rerankScore: 0.91 },
     { chunkId: chunkIds[0], snippet: 'ViT 在遥感分割中的应用综述。', vectorScore: 0.72, rerankScore: 0.55 },
-    { paperId: 'arxiv-2401.12345', snippet: '在线文献摘要片段…', vectorScore: 0.80, rerankScore: 0.88 }
+    { paperId: 'arxiv-2401.12345', snippet: '在线文献摘要片段…', vectorScore: 0.8, rerankScore: 0.88 }
   ]);
   check('写入 3 条证据', evIds.length === 3);
 
@@ -169,9 +171,7 @@ function main() {
   check('authors 反序列化为数组', Array.isArray(paper.authors) && paper.authors.length === 2);
 
   // upsert 幂等性
-  paperRepo.upsertPapers([
-    { paperId: 'arxiv-2401.12345', source: 'arxiv', title: '更新后的标题', authors: ['Alice'] }
-  ]);
+  paperRepo.upsertPapers([{ paperId: 'arxiv-2401.12345', source: 'arxiv', title: '更新后的标题', authors: ['Alice'] }]);
   check('upsert 覆盖而非重复插入', paperRepo.listPapers().length === 1);
   check('upsert 更新了字段', paperRepo.findPaper('arxiv-2401.12345').title === '更新后的标题');
 

@@ -14,18 +14,19 @@ afterEach(() => {
 
 /** 模拟一个永不返回、只响应 abort 的请求 */
 function hangingFetch() {
-  return vi.fn((_url, options) =>
-    new Promise((_, reject) => {
-      options.signal.addEventListener(
-        'abort',
-        () => {
-          const error = new Error('aborted');
-          error.name = 'AbortError';
-          reject(error);
-        },
-        { once: true }
-      );
-    })
+  return vi.fn(
+    (_url, options) =>
+      new Promise((_, reject) => {
+        options.signal.addEventListener(
+          'abort',
+          () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          },
+          { once: true }
+        );
+      })
   );
 }
 

@@ -28,7 +28,10 @@ export interface RenderProfileReport {
 
 const WINDOW_MS = 1_000;
 
-export function createRenderProfiler(label: string, now: () => number = () => (typeof performance === 'object' ? performance.now() : Date.now())) {
+export function createRenderProfiler(
+  label: string,
+  now: () => number = () => (typeof performance === 'object' ? performance.now() : Date.now())
+) {
   let startedAt: number | null = null;
   let lastAt = 0;
   let total = 0;

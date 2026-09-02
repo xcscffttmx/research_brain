@@ -31,22 +31,22 @@ DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 
 ## 变量总览
 
-| 变量名 | 必填 | 默认值 | 是否敏感 | 说明 |
-|---|---|---|---|---|
-| `QWEN_API_KEY` | 是 | - | 是 | Qwen / DashScope API Key |
-| `QWEN_BASE_URL` | 否 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 否 | Qwen 兼容 OpenAI API 地址 |
-| `QWEN_MODEL` | 否 | `qwen-plus` | 否 | 聊天模型名称 |
-| `QWEN_EMBEDDING_MODEL` | 否 | `text-embedding-v3` | 否 | 向量模型名称 |
-| `SERVER_PORT` | 建议 | `8788` | 否 | 后端监听端口，需与 Vite 代理一致 |
-| `SEMANTIC_SCHOLAR_API_KEY` | 否 | - | 是 | Semantic Scholar API Key，配置后可提升额度 |
-| `DATABASE_URL` | 建议 | - | 是 | PostgreSQL / Neon 连接串 |
-| `OBJECT_STORAGE_PROVIDER` | 否 | `s3` | 否 | 对象存储类型，预留 S3 兼容配置 |
-| `OBJECT_STORAGE_ENDPOINT` | 否 | - | 否 | 对象存储 Endpoint |
-| `OBJECT_STORAGE_REGION` | 否 | `auto` | 否 | 对象存储区域 |
-| `OBJECT_STORAGE_ACCESS_KEY` | 否 | - | 是 | 对象存储 Access Key |
-| `OBJECT_STORAGE_SECRET_KEY` | 否 | - | 是 | 对象存储 Secret Key |
-| `OBJECT_STORAGE_BUCKET` | 否 | `research-docs` | 否 | 对象存储 Bucket 名称 |
-| `OBJECT_STORAGE_FORCE_PATH_STYLE` | 否 | `true` | 否 | 是否启用 S3 path-style 访问 |
+| 变量名                            | 必填 | 默认值                                              | 是否敏感 | 说明                                       |
+| --------------------------------- | ---- | --------------------------------------------------- | -------- | ------------------------------------------ |
+| `QWEN_API_KEY`                    | 是   | -                                                   | 是       | Qwen / DashScope API Key                   |
+| `QWEN_BASE_URL`                   | 否   | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 否       | Qwen 兼容 OpenAI API 地址                  |
+| `QWEN_MODEL`                      | 否   | `qwen-plus`                                         | 否       | 聊天模型名称                               |
+| `QWEN_EMBEDDING_MODEL`            | 否   | `text-embedding-v3`                                 | 否       | 向量模型名称                               |
+| `SERVER_PORT`                     | 建议 | `8788`                                              | 否       | 后端监听端口，需与 Vite 代理一致           |
+| `SEMANTIC_SCHOLAR_API_KEY`        | 否   | -                                                   | 是       | Semantic Scholar API Key，配置后可提升额度 |
+| `DATABASE_URL`                    | 建议 | -                                                   | 是       | PostgreSQL / Neon 连接串                   |
+| `OBJECT_STORAGE_PROVIDER`         | 否   | `s3`                                                | 否       | 对象存储类型，预留 S3 兼容配置             |
+| `OBJECT_STORAGE_ENDPOINT`         | 否   | -                                                   | 否       | 对象存储 Endpoint                          |
+| `OBJECT_STORAGE_REGION`           | 否   | `auto`                                              | 否       | 对象存储区域                               |
+| `OBJECT_STORAGE_ACCESS_KEY`       | 否   | -                                                   | 是       | 对象存储 Access Key                        |
+| `OBJECT_STORAGE_SECRET_KEY`       | 否   | -                                                   | 是       | 对象存储 Secret Key                        |
+| `OBJECT_STORAGE_BUCKET`           | 否   | `research-docs`                                     | 否       | 对象存储 Bucket 名称                       |
+| `OBJECT_STORAGE_FORCE_PATH_STYLE` | 否   | `true`                                              | 否       | 是否启用 S3 path-style 访问                |
 
 ## Qwen 相关变量
 

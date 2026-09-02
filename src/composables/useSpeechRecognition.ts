@@ -7,7 +7,9 @@ export function useSpeechRecognition(onText: (text: string) => void) {
   const error = ref('');
   let recognition: SpeechRecognition | null = null;
 
-  const supported = computed(() => typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
+  const supported = computed(
+    () => typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+  );
 
   const stop = () => {
     recognition?.stop();

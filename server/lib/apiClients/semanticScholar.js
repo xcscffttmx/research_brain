@@ -23,7 +23,12 @@ export async function searchSemanticScholar(query, limit = 5) {
 
   const response = await fetchWithTimeout(endpoint, { headers }, S2_TIMEOUT_MS);
   if (!response.ok) {
-    throw createAppError('SEMANTIC_SCHOLAR_FETCH_FAILED', `Semantic Scholar 检索失败（${response.status}）`, '请稍后重试。', 502);
+    throw createAppError(
+      'SEMANTIC_SCHOLAR_FETCH_FAILED',
+      `Semantic Scholar 检索失败（${response.status}）`,
+      '请稍后重试。',
+      502
+    );
   }
 
   const payload = await response.json();

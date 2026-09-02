@@ -50,10 +50,7 @@ describe('resolveArgs 结果回填', () => {
   });
 
   it('递归处理嵌套对象与数组', () => {
-    const out = resolveArgs(
-      { nested: { arr: ['{{step1.count}}', 'literal'] } },
-      scratchpad
-    );
+    const out = resolveArgs({ nested: { arr: ['{{step1.count}}', 'literal'] } }, scratchpad);
     expect(out.nested.arr).toEqual([2, 'literal']);
   });
 
@@ -111,9 +108,7 @@ describe('executePlan 正常流程', () => {
   it('scratchpad 同时按 stepN 和工具名索引', async () => {
     const root = createCancelRoot('run');
     const callTool = async () => ({ value: 42 });
-    const plan = makePlan([
-      { step: 1, tool: 'get_current_time', args: {}, reason: 'r', optional: false }
-    ]);
+    const plan = makePlan([{ step: 1, tool: 'get_current_time', args: {}, reason: 'r', optional: false }]);
 
     const out = await executePlan({ plan, runId: 'run', cancelNode: root, callTool, persist: false });
 
@@ -188,9 +183,7 @@ describe('executePlan 失败处理', () => {
     const emitted = [];
     const emit = { toolResult: (p) => emitted.push(p), toolCall: () => {}, status: () => {} };
 
-    const plan = makePlan([
-      { step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: true }
-    ]);
+    const plan = makePlan([{ step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: true }]);
 
     const out = await executePlan({
       plan,
@@ -249,9 +242,7 @@ describe('executePlan 取消联动', () => {
         signal.addEventListener('abort', () => reject(new CancelledError({ code: 'x' })), { once: true });
       });
 
-    const plan = makePlan([
-      { step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: false }
-    ]);
+    const plan = makePlan([{ step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: false }]);
 
     const promise = executePlan({ plan, runId: 'run', cancelNode: root, callTool, persist: false });
     await new Promise((r) => setTimeout(r, 20));
@@ -267,9 +258,7 @@ describe('executePlan 取消联动', () => {
         signal.addEventListener('abort', () => reject(new CancelledError({ code: 'x' })), { once: true });
       });
 
-    const plan = makePlan([
-      { step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: true }
-    ]);
+    const plan = makePlan([{ step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: true }]);
 
     const promise = executePlan({ plan, runId: 'run', cancelNode: root, callTool, persist: false });
     await new Promise((r) => setTimeout(r, 20));
@@ -283,9 +272,7 @@ describe('executePlan 取消联动', () => {
     root.cancel(CancelReason.USER_ABORT);
     const callTool = vi.fn();
 
-    const plan = makePlan([
-      { step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: false }
-    ]);
+    const plan = makePlan([{ step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: false }]);
 
     await expect(
       executePlan({ plan, runId: 'run', cancelNode: root, callTool, persist: false })
@@ -350,9 +337,7 @@ describe('executePlan 事件发射', () => {
       return { ok: true };
     };
 
-    const plan = makePlan([
-      { step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: false }
-    ]);
+    const plan = makePlan([{ step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r', optional: false }]);
 
     await executePlan({ plan, runId: 'run', cancelNode: root, callTool, emit, persist: false });
 
