@@ -1,0 +1,7 @@
+dist
+node_modules
+bench
+data
+src/types/auto-imports.d.ts
+src/types/components.d.ts
+package-lock.json

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { runAgentTurn, abortRun, getActiveRunCount } from './runtime.js';
-import { CancelReason, CancelledError } from './cancelTree.js';
+import { CancelledError } from './cancelTree.js';
 import { createAppError } from '../lib/errors.js';
 
 /** 收集 SSE 事件的假 writer */
@@ -337,7 +337,9 @@ describe('runAgentTurn 与 Agentic RAG 的接线', () => {
         callTool: vi.fn(),
         runRag: ({ cancelNode }) =>
           new Promise((_, reject) => {
-            cancelNode.signal.addEventListener('abort', () => reject(new CancelledError({ code: 'x' })), { once: true });
+            cancelNode.signal.addEventListener('abort', () => reject(new CancelledError({ code: 'x' })), {
+              once: true
+            });
           }),
         generateAnswer: async () => 'never'
       }

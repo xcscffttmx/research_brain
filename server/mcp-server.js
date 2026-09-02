@@ -38,19 +38,19 @@ dotenv.config({ override: false });
 
 // Agent 定义
 const agents = {
- 文献检索: {
+  文献检索: {
     id: 'literature-agent',
     name: '文献检索 Agent',
     description: '负责学术文献的搜索、分析和管理',
     capabilities: ['文献搜索', '文献分析', '引用关系分析', '文献摘要']
   },
- 论文写作: {
+  论文写作: {
     id: 'writing-agent',
     name: '论文写作 Agent',
     description: '辅助科研论文的撰写、修改和优化',
     capabilities: ['大纲生成', '内容写作', '语法检查', '引用格式处理']
   },
- 公式推导: {
+  公式推导: {
     id: 'formula-agent',
     name: '公式推导 Agent',
     description: '支持数学公式的推导、验证和解释',
@@ -91,9 +91,10 @@ async function hydrateState() {
     state.literature.categories = Array.isArray(parsed?.literature?.categories) ? parsed.literature.categories : [];
     state.literature.tags = Array.isArray(parsed?.literature?.tags) ? parsed.literature.tags : [];
     state.literature.papers = Array.isArray(parsed?.literature?.papers) ? parsed.literature.papers : [];
-    state.literature.paperSchemas = parsed?.literature?.paperSchemas && typeof parsed.literature.paperSchemas === 'object'
-      ? parsed.literature.paperSchemas
-      : {};
+    state.literature.paperSchemas =
+      parsed?.literature?.paperSchemas && typeof parsed.literature.paperSchemas === 'object'
+        ? parsed.literature.paperSchemas
+        : {};
     console.log(`知识库已加载：${chunkRepo.countChunks()} 个分块，文献缓存 ${state.literature.papers.length} 篇。`);
   } catch (error) {
     console.error('加载本地文献缓存失败，将使用空状态启动:', error);
@@ -165,7 +166,10 @@ function findCachedPaper(paperId) {
 }
 
 function draftFindingsFromAbstract(abstract) {
-  const parts = normalizeWhitespace(abstract).split(/[.。!?！？]/).map((line) => line.trim()).filter(Boolean);
+  const parts = normalizeWhitespace(abstract)
+    .split(/[.。!?！？]/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (!parts.length) {
     return ['缺少摘要信息，建议先补充论文摘要或全文后再分析。'];
   }
@@ -257,13 +261,15 @@ function buildSchemaSearchText(record) {
     Array.isArray(schema.metrics) ? schema.metrics.join(' ') : '',
     schema.conclusion || '',
     Array.isArray(schema.limitations) ? schema.limitations.join(' ') : ''
-  ].join(' ').toLowerCase();
+  ]
+    .join(' ')
+    .toLowerCase();
 }
 
 function splitKeywords(query) {
   return String(query || '')
     .toLowerCase()
-    .split(/[\s，。；：！？、,.!?;:\/\\|]+/)
+    .split(/[\s，。；：！？、,.!?;:/\\|]+/)
     .map((part) => part.trim())
     .filter((part) => part.length > 1);
 }
@@ -293,7 +299,9 @@ function buildMemoryCitations(matches) {
   return matches.slice(0, 6).map((item, index) => ({
     id: `memory-${index + 1}`,
     title: item.title,
-    snippet: [item.schema.problem, item.schema.method, (item.schema.limitations || []).join('；')].filter(Boolean).join(' | '),
+    snippet: [item.schema.problem, item.schema.method, (item.schema.limitations || []).join('；')]
+      .filter(Boolean)
+      .join(' | '),
     source: `PaperMemory / ${item.paperId}`,
     score: Number(item.score.toFixed(4))
   }));
@@ -342,7 +350,9 @@ function mineResearchGaps(records, focus = '') {
   const opportunities = [];
   const focusKeywords = splitKeywords(focus);
 
-  const underExploredMethods = Array.from(methodCount.entries()).filter(([, count]) => count === 1).slice(0, 2);
+  const underExploredMethods = Array.from(methodCount.entries())
+    .filter(([, count]) => count === 1)
+    .slice(0, 2);
   for (const [method] of underExploredMethods) {
     opportunities.push(
       normalizeGap(
@@ -354,7 +364,9 @@ function mineResearchGaps(records, focus = '') {
     );
   }
 
-  const underExploredDatasets = Array.from(datasetCount.entries()).filter(([, count]) => count === 1).slice(0, 2);
+  const underExploredDatasets = Array.from(datasetCount.entries())
+    .filter(([, count]) => count === 1)
+    .slice(0, 2);
   for (const [dataset] of underExploredDatasets) {
     opportunities.push(
       normalizeGap(
@@ -366,7 +378,9 @@ function mineResearchGaps(records, focus = '') {
     );
   }
 
-  const recurringLimitations = Array.from(limitationCount.entries()).filter(([, count]) => count >= 2).slice(0, 2);
+  const recurringLimitations = Array.from(limitationCount.entries())
+    .filter(([, count]) => count >= 2)
+    .slice(0, 2);
   for (const [limitation, count] of recurringLimitations) {
     opportunities.push(
       normalizeGap(
@@ -450,9 +464,10 @@ function buildExperimentSpecFromGap(opportunityItem, records) {
   const supportingRecords = records.filter((record) => opportunityItem.supportingPaperIds.includes(record.paperId));
   const candidateRecords = supportingRecords.length ? supportingRecords : records;
 
-  const methods = Array.from(
-    new Set(candidateRecords.map((record) => record.schema.method).filter(Boolean))
-  ).slice(0, 3);
+  const methods = Array.from(new Set(candidateRecords.map((record) => record.schema.method).filter(Boolean))).slice(
+    0,
+    3
+  );
   const baseline = methods[0] || '当前主流基线方法';
   const dataset = pickPrimaryDataset(candidateRecords);
   const metrics = pickPrimaryMetric(candidateRecords);
@@ -530,7 +545,9 @@ async function ingestLiteratureByPaperIds(paperIds) {
       '',
       '## Abstract',
       paper.abstract || 'N/A'
-    ].join('\n').trim();
+    ]
+      .join('\n')
+      .trim();
 
     const document = await persistDocumentWithChunks({ name: docName, content, source: 'literature' });
     inserted.push({
@@ -543,7 +560,12 @@ async function ingestLiteratureByPaperIds(paperIds) {
   }
 
   if (!inserted.length) {
-    throw createAppError('LITERATURE_NOT_INGESTED', '没有新的文献被导入', '可能是 paperId 无效，或文献已存在于知识库。', 400);
+    throw createAppError(
+      'LITERATURE_NOT_INGESTED',
+      '没有新的文献被导入',
+      '可能是 paperId 无效，或文献已存在于知识库。',
+      400
+    );
   }
 
   return inserted;
@@ -590,7 +612,12 @@ async function ingestDocuments(documents) {
   const supported = documents.filter((document) => /\.(txt|md|markdown|json|pdf|docx)$/i.test(document.name));
 
   if (!supported.length) {
-    throw createAppError('UNSUPPORTED_FILES', '没有可导入的知识文件', '仅支持 `.md`、`.markdown`、`.txt`、`.json`、`.pdf`、`.docx` 文件。', 400);
+    throw createAppError(
+      'UNSUPPORTED_FILES',
+      '没有可导入的知识文件',
+      '仅支持 `.md`、`.markdown`、`.txt`、`.json`、`.pdf`、`.docx` 文件。',
+      400
+    );
   }
 
   const inserted = [];
@@ -736,13 +763,15 @@ server.registerTool(
   {
     description: '导入知识文档到向量知识库中并建立向量索引',
     inputSchema: z.object({
-      documents: z.array(
-        z.object({
-          name: z.string().min(1, 'name 不能为空'),
-          content: z.string().min(1, 'content 不能为空'),
-          isBinary: z.boolean().optional()
-        })
-      ).min(1, '至少导入一份文档')
+      documents: z
+        .array(
+          z.object({
+            name: z.string().min(1, 'name 不能为空'),
+            content: z.string().min(1, 'content 不能为空'),
+            isBinary: z.boolean().optional()
+          })
+        )
+        .min(1, '至少导入一份文档')
     })
   },
   async ({ documents }) => {
@@ -802,7 +831,7 @@ server.registerTool(
     inputSchema: z.object({})
   },
   async () => {
-    const agentList = Object.values(agents).map(agent => ({
+    const agentList = Object.values(agents).map((agent) => ({
       id: agent.id,
       name: agent.name,
       description: agent.description,
@@ -822,15 +851,15 @@ server.registerTool(
     })
   },
   async ({ agentId, task }) => {
-    const agent = Object.values(agents).find(a => a.id === agentId);
+    const agent = Object.values(agents).find((a) => a.id === agentId);
     if (!agent) {
       throw createAppError('AGENT_NOT_FOUND', 'Agent 不存在', '请选择有效的 Agent ID。', 404);
     }
-    
+
     // 保存 Agent 状态
     state.agentState.selectedAgent = agentId;
     state.agentState.currentTask = task;
-    
+
     return toTextContent({
       agent: agent,
       task: task,
@@ -848,7 +877,7 @@ server.registerTool(
     })
   },
   async ({ agentId }) => {
-    const agent = Object.values(agents).find(a => a.id === agentId);
+    const agent = Object.values(agents).find((a) => a.id === agentId);
     if (!agent) {
       throw createAppError('AGENT_NOT_FOUND', 'Agent 不存在', '请选择有效的 Agent ID。', 404);
     }
@@ -866,35 +895,35 @@ server.registerTool(
     })
   },
   async ({ task, agents: agentIds }) => {
-    const selectedAgents = agentIds.map(id => Object.values(agents).find(a => a.id === id)).filter(Boolean);
-    
+    const selectedAgents = agentIds.map((id) => Object.values(agents).find((a) => a.id === id)).filter(Boolean);
+
     if (selectedAgents.length === 0) {
       throw createAppError('AGENTS_NOT_FOUND', '没有找到有效的 Agent', '请选择有效的 Agent ID。', 404);
     }
-    
+
     // 模拟 Agent 协作过程
-    const协作Plan = {
+    const collaborationPlan = {
       task: task,
       agents: selectedAgents,
-      steps: selectedAgents.map(agent => ({
+      steps: selectedAgents.map((agent) => ({
         agent: agent.name,
         role: getAgentRole(agent.id, task),
         status: 'pending'
       }))
     };
-    
+
     // 保存协作计划
-    state.agentState.collaborationPlan =协作Plan;
-    
+    state.agentState.collaborationPlan = collaborationPlan;
+
     return toTextContent({
       message: `已启动多 Agent 协作处理任务：${task}`,
-      plan:协作Plan
+      plan: collaborationPlan
     });
   }
 );
 
 // 辅助函数：根据 Agent ID 和任务获取角色
-function getAgentRole(agentId, task) {
+function getAgentRole(agentId, _task) {
   const roleMap = {
     'literature-agent': '文献收集和分析',
     'writing-agent': '内容撰写和优化',
@@ -943,7 +972,8 @@ server.registerTool(
         tasks.push(safeFetch('semantic_scholar', () => searchSemanticScholar(query, expandedLimit)));
       } else {
         if (source === 'arxiv') tasks.push(safeFetch('arxiv', () => searchArxiv(query, expandedLimit)));
-        if (source === 'semantic_scholar') tasks.push(safeFetch('semantic_scholar', () => searchSemanticScholar(query, expandedLimit)));
+        if (source === 'semantic_scholar')
+          tasks.push(safeFetch('semantic_scholar', () => searchSemanticScholar(query, expandedLimit)));
         if (source === 'openalex') tasks.push(safeFetch('openalex', () => searchOpenAlex(query, expandedLimit)));
       }
 
@@ -953,7 +983,9 @@ server.registerTool(
       const openalexRows = resultsBySource.find((item) => item.name === 'openalex')?.rows || [];
 
       const currentYear = new Date().getFullYear();
-      const queryYears = Array.from(String(query).matchAll(/\b(19|20)\d{2}\b/g)).map((m) => Number(m[0])).filter((y) => Number.isFinite(y));
+      const queryYears = Array.from(String(query).matchAll(/\b(19|20)\d{2}\b/g))
+        .map((m) => Number(m[0]))
+        .filter((y) => Number.isFinite(y));
 
       let minYear = Number.isInteger(sinceYear) ? sinceYear : currentYear - 3;
       let maxYear = Number.isInteger(untilYear) ? untilYear : undefined;
@@ -980,7 +1012,14 @@ server.registerTool(
         .slice(0, limit);
 
       if (!merged.length && warnings.length === tasks.length && tasks.length > 0) {
-        return toErrorContent(createAppError('LITERATURE_ALL_SOURCES_FAILED', '文献检索失败：所有数据源都不可用', warnings.map((w) => `${w.source}: ${w.message}`).join('\n'), 502));
+        return toErrorContent(
+          createAppError(
+            'LITERATURE_ALL_SOURCES_FAILED',
+            '文献检索失败：所有数据源都不可用',
+            warnings.map((w) => `${w.source}: ${w.message}`).join('\n'),
+            502
+          )
+        );
       }
 
       cacheLiteraturePapers(merged);
@@ -1013,7 +1052,12 @@ server.registerTool(
     try {
       const paper = findCachedPaper(paperId);
       if (!paper) {
-        throw createAppError('PAPER_NOT_FOUND', '未找到指定文献', '请先调用 search_literature 并使用返回的 paperId。', 404);
+        throw createAppError(
+          'PAPER_NOT_FOUND',
+          '未找到指定文献',
+          '请先调用 search_literature 并使用返回的 paperId。',
+          404
+        );
       }
 
       return toTextContent({
@@ -1050,13 +1094,16 @@ server.registerTool(
     try {
       const paper = findCachedPaper(paperId);
       if (!paper) {
-        throw createAppError('PAPER_NOT_FOUND', '未找到指定文献', '请先调用 search_literature 并使用返回的 paperId。', 404);
+        throw createAppError(
+          'PAPER_NOT_FOUND',
+          '未找到指定文献',
+          '请先调用 search_literature 并使用返回的 paperId。',
+          404
+        );
       }
 
       const abstract = normalizeWhitespace(paper.abstract || '');
-      const summary = abstract
-        ? abstract.slice(0, 700)
-        : '当前文献缺少摘要内容，建议补充全文后再生成更准确摘要。';
+      const summary = abstract ? abstract.slice(0, 700) : '当前文献缺少摘要内容，建议补充全文后再生成更准确摘要。';
 
       return toTextContent({
         id: paper.paperId,
@@ -1159,7 +1206,12 @@ server.registerTool(
     try {
       const records = Object.values(state.literature.paperSchemas || {});
       if (!records.length) {
-        throw createAppError('SCHEMA_EMPTY', '尚未建立 Paper Memory', '请先对至少一篇文献执行 extract_paper_schema。', 400);
+        throw createAppError(
+          'SCHEMA_EMPTY',
+          '尚未建立 Paper Memory',
+          '请先对至少一篇文献执行 extract_paper_schema。',
+          400
+        );
       }
 
       const keywords = splitKeywords(query);
@@ -1230,7 +1282,12 @@ server.registerTool(
     try {
       const records = Object.values(state.literature.paperSchemas || {});
       if (records.length < 2) {
-        throw createAppError('GAP_DATA_INSUFFICIENT', '研究空白挖掘需要更多论文', '请至少先完成 2 篇论文的 extract_paper_schema。', 400);
+        throw createAppError(
+          'GAP_DATA_INSUFFICIENT',
+          '研究空白挖掘需要更多论文',
+          '请至少先完成 2 篇论文的 extract_paper_schema。',
+          400
+        );
       }
 
       const opportunities = mineResearchGaps(records, focus);
@@ -1266,12 +1323,22 @@ server.registerTool(
     try {
       const records = Object.values(state.literature.paperSchemas || {});
       if (records.length < 2) {
-        throw createAppError('SPEC_DATA_INSUFFICIENT', '生成 Experiment Spec 需要更多论文', '请至少先完成 2 篇论文的 extract_paper_schema。', 400);
+        throw createAppError(
+          'SPEC_DATA_INSUFFICIENT',
+          '生成 Experiment Spec 需要更多论文',
+          '请至少先完成 2 篇论文的 extract_paper_schema。',
+          400
+        );
       }
 
       const opportunities = mineResearchGaps(records, focus);
       if (!opportunities.length) {
-        throw createAppError('SPEC_GAP_EMPTY', '当前无法生成 Experiment Spec', '请先调用 mine_research_gaps 确认可用机会点。', 400);
+        throw createAppError(
+          'SPEC_GAP_EMPTY',
+          '当前无法生成 Experiment Spec',
+          '请先调用 mine_research_gaps 确认可用机会点。',
+          400
+        );
       }
 
       const selected = opportunities[Math.min(gapIndex, opportunities.length - 1)];
@@ -1307,56 +1374,31 @@ server.registerTool(
         {
           id: '1',
           title: '1. 引言',
-          subsections: [
-            '1.1 研究背景',
-            '1.2 研究目的',
-            '1.3 研究方法',
-            '1.4 论文结构'
-          ]
+          subsections: ['1.1 研究背景', '1.2 研究目的', '1.3 研究方法', '1.4 论文结构']
         },
         {
           id: '2',
           title: '2. 文献综述',
-          subsections: [
-            '2.1 相关研究现状',
-            '2.2 现有方法分析',
-            '2.3 研究 gaps',
-            '2.4 本文贡献'
-          ]
+          subsections: ['2.1 相关研究现状', '2.2 现有方法分析', '2.3 研究 gaps', '2.4 本文贡献']
         },
         {
           id: '3',
           title: '3. 研究方法',
-          subsections: [
-            '3.1 研究设计',
-            '3.2 数据收集',
-            '3.3 分析方法',
-            '3.4 评估指标'
-          ]
+          subsections: ['3.1 研究设计', '3.2 数据收集', '3.3 分析方法', '3.4 评估指标']
         },
         {
           id: '4',
           title: '4. 实验结果',
-          subsections: [
-            '4.1 实验设置',
-            '4.2 结果分析',
-            '4.3 对比研究',
-            '4.4 讨论'
-          ]
+          subsections: ['4.1 实验设置', '4.2 结果分析', '4.3 对比研究', '4.4 讨论']
         },
         {
           id: '5',
           title: '5. 结论与展望',
-          subsections: [
-            '5.1 主要结论',
-            '5.2 研究局限性',
-            '5.3 未来研究方向',
-            '5.4 总结'
-          ]
+          subsections: ['5.1 主要结论', '5.2 研究局限性', '5.3 未来研究方向', '5.4 总结']
         }
       ].slice(0, sections)
     };
-    
+
     return toTextContent(mockOutline);
   }
 );
@@ -1379,7 +1421,7 @@ server.registerTool(
       content: `# ${section}\n\n这是关于"${topic}"的${section}部分内容。本部分详细讨论了${topic}的相关概念、理论基础和应用场景。\n\n首先，我们介绍了${topic}的基本定义和重要性。${topic}是现代科学研究中的重要领域，它涉及到多个学科的交叉融合，包括计算机科学、数学、统计学等。\n\n其次，我们分析了${topic}的发展历程和现状。近年来，随着技术的不断进步，${topic}在各个领域都取得了显著的进展，为科学研究提供了新的方法和思路。\n\n然后，我们探讨了${topic}的核心技术和方法。这些技术和方法不仅推动了${topic}本身的发展，也为其他领域的研究提供了有力的工具。\n\n最后，我们讨论了${topic}的未来发展趋势和挑战。随着研究的深入，${topic}将面临更多的机遇和挑战，需要研究者们不断创新和探索。\n\n通过本部分的讨论，我们希望能够为读者提供对${topic}的全面了解，为后续的研究工作奠定基础。`,
       wordCount: length
     };
-    
+
     return toTextContent(mockContent);
   }
 );
@@ -1392,7 +1434,7 @@ server.registerTool(
       content: z.string().min(1, 'content 不能为空')
     })
   },
-  async ({ content }) => {
+  async ({ content: _content }) => {
     // 模拟语法检查结果
     const mockCheck = {
       issues: [
@@ -1412,14 +1454,10 @@ server.registerTool(
           location: '第4段第2行'
         }
       ],
-      suggestions: [
-        '增加更多的学术引用',
-        '使用更一致的术语',
-        '改进段落结构'
-      ],
+      suggestions: ['增加更多的学术引用', '使用更一致的术语', '改进段落结构'],
       score: 85
     };
-    
+
     return toTextContent(mockCheck);
   }
 );
@@ -1429,12 +1467,14 @@ server.registerTool(
   {
     description: '处理论文引用格式',
     inputSchema: z.object({
-      citations: z.array(z.object({
-        author: z.string(),
-        title: z.string(),
-        year: z.number(),
-        journal: z.string().optional()
-      })),
+      citations: z.array(
+        z.object({
+          author: z.string(),
+          title: z.string(),
+          year: z.number(),
+          journal: z.string().optional()
+        })
+      ),
       style: z.string().optional()
     })
   },
@@ -1443,15 +1483,16 @@ server.registerTool(
     const formattedCitations = citations.map((citation, index) => ({
       id: index + 1,
       original: citation,
-      formatted: style === 'APA' 
-        ? `${citation.author} (${citation.year}). ${citation.title}. ${citation.journal || 'Unpublished work'}.`
-        : `${citation.author}. ${citation.title}. ${citation.journal || 'Unpublished work'}, ${citation.year}.`
+      formatted:
+        style === 'APA'
+          ? `${citation.author} (${citation.year}). ${citation.title}. ${citation.journal || 'Unpublished work'}.`
+          : `${citation.author}. ${citation.title}. ${citation.journal || 'Unpublished work'}, ${citation.year}.`
     }));
-    
+
     return toTextContent({
       style: style,
       citations: formattedCitations,
-      bibliography: formattedCitations.map(c => c.formatted).join('\n')
+      bibliography: formattedCitations.map((c) => c.formatted).join('\n')
     });
   }
 );
@@ -1499,7 +1540,7 @@ server.registerTool(
       ].slice(0, steps),
       result: '推导完成: ' + formula + ' 的简化形式'
     };
-    
+
     return toTextContent(mockDerivation);
   }
 );
@@ -1534,12 +1575,9 @@ server.registerTool(
           message: '边界情况处理正确'
         }
       ],
-      suggestions: [
-        '可以考虑更简洁的表达方式',
-        '建议添加适用条件说明'
-      ]
+      suggestions: ['可以考虑更简洁的表达方式', '建议添加适用条件说明']
     };
-    
+
     return toTextContent(mockVerification);
   }
 );
@@ -1575,18 +1613,13 @@ server.registerTool(
           meaning: '常数项，表示基础值'
         }
       ],
-      applications: [
-        '物理学中的运动学模型',
-        '经济学中的需求预测',
-        '工程学中的系统建模',
-        '生物学中的生长模型'
-      ],
+      applications: ['物理学中的运动学模型', '经济学中的需求预测', '工程学中的系统建模', '生物学中的生长模型'],
       examples: [
         '在自由落体运动中，位移与时间的关系可以用类似公式表示',
         '在市场分析中，商品价格与需求量的关系可以用类似公式建模'
       ]
     };
-    
+
     return toTextContent(mockExplanation);
   }
 );
@@ -1610,13 +1643,9 @@ server.registerTool(
       calculation: '根据给定参数计算结果的过程',
       result: '计算结果: 42',
       interpretation: '这个结果表示在给定条件下的预期值，符合实际情况。',
-      implications: [
-        '结果在合理范围内',
-        '可以用于预测类似情况下的结果',
-        '需要进一步验证实际数据'
-      ]
+      implications: ['结果在合理范围内', '可以用于预测类似情况下的结果', '需要进一步验证实际数据']
     };
-    
+
     return toTextContent(mockApplication);
   }
 );
@@ -1638,9 +1667,9 @@ server.registerTool(
       description: description || '',
       createdAt: Date.now()
     };
-    
+
     state.literature.categories.push(category);
-    
+
     return toTextContent({
       category: category,
       message: `已添加分类：${name}`
@@ -1662,9 +1691,9 @@ server.registerTool(
       name: name,
       createdAt: Date.now()
     };
-    
+
     state.literature.tags.push(tag);
-    
+
     return toTextContent({
       tag: tag,
       message: `已添加标签：${name}`
@@ -1730,7 +1759,7 @@ server.registerTool(
         abstract: '本文综述了人工智能技术在辅助科研方面的最新进展，包括文献分析、实验设计等。'
       }
     ];
-    
+
     return toTextContent({
       categoryId: categoryId,
       results: mockResults,
@@ -1769,7 +1798,7 @@ server.registerTool(
         abstract: '本文研究了深度学习技术在医学影像分析中的应用，提高了疾病诊断的准确性。'
       }
     ];
-    
+
     return toTextContent({
       tagId: tagId,
       results: mockResults,
@@ -1829,7 +1858,7 @@ server.registerTool(
         }
       ]
     };
-    
+
     return toTextContent(mockDecomposition);
   }
 );
@@ -1839,22 +1868,24 @@ server.registerTool(
   {
     description: '为子任务分配 Agent',
     inputSchema: z.object({
-      subtasks: z.array(z.object({
-        id: z.string(),
-        title: z.string(),
-        agent: z.string()
-      }))
+      subtasks: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          agent: z.string()
+        })
+      )
     })
   },
   async ({ subtasks }) => {
     // 模拟 Agent 分配
-    const assignments = subtasks.map(subtask => ({
+    const assignments = subtasks.map((subtask) => ({
       ...subtask,
       assigned: true,
       estimatedTime: '2-4 小时',
       status: 'pending'
     }));
-    
+
     return toTextContent({
       assignments: assignments,
       totalAssignments: assignments.length
@@ -1914,7 +1945,7 @@ server.registerTool(
       ],
       progress: 40
     };
-    
+
     return toTextContent(mockExecution);
   }
 );
@@ -1950,7 +1981,7 @@ server.registerTool(
         }
       ]
     };
-    
+
     return toTextContent(mockStatus);
   }
 );
@@ -1978,7 +2009,7 @@ server.registerTool(
       ],
       summary: '多 Agent 协作成功完成了科研任务，生成了完整的论文初稿。'
     };
-    
+
     return toTextContent(mockCompletion);
   }
 );
