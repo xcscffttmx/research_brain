@@ -21,14 +21,37 @@ export const CancelReason = {
   PARENT_CANCELLED: 'parent_cancelled',
   UPSTREAM_ERROR: 'upstream_error',
   LOOP_DETECTED: 'loop_detected'
-};
+} as const;
+
+export type CancelReasonCode = (typeof CancelReason)[keyof typeof CancelReason];
+
+export interface CancelNodeReason {
+  code: CancelReasonCode;
+  detail: string;
+  nodeId: string;
+}
+
+export interface CancelTreeSnapshot {
+  id: string;
+  cancelled: boolean;
+  reason: CancelNodeReason | null;
+  children: CancelTreeSnapshot[];
+}
 
 export class CancelNode {
+  id: string;
+  parent: CancelNode | null;
+  children: Set<CancelNode>;
+  controller: AbortController;
+  reason: CancelNodeReason | null;
+  cancelledAt: number | null;
+  detached: boolean;
+
   /**
    * @param {string} id 节点标识（run id / step id / tool call id）
    * @param {CancelNode|null} parent
    */
-  constructor(id, parent = null) {
+  constructor(id: string, parent: CancelNode | null = null) {
     this.id = id;
     this.parent = parent;
     this.children = new Set();
@@ -46,16 +69,16 @@ export class CancelNode {
     }
   }
 
-  get signal() {
+  get signal(): AbortSignal {
     return this.controller.signal;
   }
 
-  get isCancelled() {
+  get isCancelled(): boolean {
     return this.controller.signal.aborted;
   }
 
   /** 派生子节点 */
-  child(id) {
+  child(id: string): CancelNode {
     return new CancelNode(id, this);
   }
 
@@ -64,7 +87,7 @@ export class CancelNode {
    * @param {string} reasonCode CancelReason 之一
    * @param {string} [detail] 附加说明
    */
-  cancel(reasonCode = CancelReason.USER_ABORT, detail = '') {
+  cancel(reasonCode: CancelReasonCode = CancelReason.USER_ABORT, detail = ''): CancelNodeReason | null {
     if (this.isCancelled) return this.reason;
 
     this.reason = { code: reasonCode, detail, nodeId: this.id };
@@ -83,7 +106,7 @@ export class CancelNode {
    * 从父节点摘除（正常完成时调用），防止 children 集合无限增长。
    * 摘除后本节点仍可独立使用，但父节点 abort 不再影响它。
    */
-  detach() {
+  detach(): void {
     if (this.parent) {
       this.parent.children.delete(this);
     }
@@ -91,14 +114,14 @@ export class CancelNode {
   }
 
   /** 当前子树的节点总数（含自己），用于泄漏检测与调试 */
-  size() {
+  size(): number {
     let total = 1;
     for (const child of this.children) total += child.size();
     return total;
   }
 
   /** 导出子树结构快照（调试/可视化用） */
-  snapshot() {
+  snapshot(): CancelTreeSnapshot {
     return {
       id: this.id,
       cancelled: this.isCancelled,
@@ -111,7 +134,7 @@ export class CancelNode {
    * 抛出取消错误（供业务代码在 await 点主动检查）。
    * @throws {CancelledError}
    */
-  throwIfCancelled() {
+  throwIfCancelled(): void {
     if (this.isCancelled) {
       throw new CancelledError(this.reason);
     }
@@ -120,7 +143,10 @@ export class CancelNode {
 
 /** 取消导致的错误，与普通业务错误区分开 */
 export class CancelledError extends Error {
-  constructor(reason) {
+  code: 'CANCELLED';
+  reason: CancelNodeReason | null | undefined;
+
+  constructor(reason?: CancelNodeReason | null) {
     super(`操作已取消：${reason?.code || 'unknown'}${reason?.detail ? ` (${reason.detail})` : ''}`);
     this.name = 'CancelledError';
     this.code = 'CANCELLED';
@@ -133,7 +159,7 @@ export class CancelledError extends Error {
  * @param {string} id
  * @param {AbortSignal} [externalSignal] 外部信号（如 HTTP 请求断开），会作为上游触发器
  */
-export function createCancelRoot(id, externalSignal) {
+export function createCancelRoot(id: string, externalSignal?: AbortSignal): CancelNode {
   const root = new CancelNode(id);
 
   if (externalSignal) {

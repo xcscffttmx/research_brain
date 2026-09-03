@@ -6,10 +6,11 @@
  *   - 本模块面向"任意异步任务"，且与取消树联动：超时/取消都走同一套 CancelNode
  */
 import { CancelReason, CancelledError } from './cancelTree.js';
+import type { CancelNode } from './cancelTree.js';
 import { createAppError } from '../lib/errors.js';
 
 /** 不同工具的默认超时（毫秒）。检索类慢、本地类快 */
-export const TOOL_TIMEOUTS = {
+export const TOOL_TIMEOUTS: Record<string, number> = {
   search_literature: 20_000,
   search_knowledge: 10_000,
   extract_paper_schema: 45_000,
@@ -26,11 +27,44 @@ const DEFAULT_POLICY = {
   jitterRatio: 0.3
 };
 
+export interface RetryPolicy {
+  retries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  jitterRatio: number;
+}
+
+export interface RunWithPolicyInput<T> {
+  toolName: string;
+  task: (signal: AbortSignal) => Promise<T>;
+  parentNode: CancelNode;
+  timeoutMs?: number;
+  policy?: Partial<RetryPolicy>;
+  onAttempt?: (info: { attempt: number; error?: ErrorWithCode; delayMs?: number }) => void;
+}
+
+export interface RunWithPolicyResult<T> {
+  result: T;
+  attempts: number;
+  durationMs: number;
+}
+
+interface ErrorWithCode extends Error {
+  code?: string;
+  status?: number;
+}
+
+function toErrorWithCode(error: unknown): ErrorWithCode {
+  if (error instanceof Error) return error as ErrorWithCode;
+  return createAppError('UNKNOWN_ERROR', String(error || '未知错误'));
+}
+
 /** 判断一个错误是否值得重试 */
-export function isRetryableError(error) {
+export function isRetryableError(error: unknown): boolean {
+  const err = toErrorWithCode(error);
   if (error instanceof CancelledError) return false;
   // 用户主动取消不重试
-  if (error?.code === 'CANCELLED') return false;
+  if (err.code === 'CANCELLED') return false;
 
   const retryableCodes = new Set([
     'UPSTREAM_TIMEOUT',
@@ -43,7 +77,7 @@ export function isRetryableError(error) {
     'OPENALEX_FETCH_FAILED',
     'QWEN_HTTP_ERROR'
   ]);
-  if (retryableCodes.has(error?.code)) return true;
+  if (err.code && retryableCodes.has(err.code)) return true;
 
   // 参数错误、鉴权错误、数据不足等不重试
   const nonRetryableCodes = new Set([
@@ -54,21 +88,21 @@ export function isRetryableError(error) {
     'GAP_DATA_INSUFFICIENT',
     'SPEC_DATA_INSUFFICIENT'
   ]);
-  if (nonRetryableCodes.has(error?.code)) return false;
+  if (err.code && nonRetryableCodes.has(err.code)) return false;
 
   // 5xx 视为可重试
-  return typeof error?.status === 'number' && error.status >= 500;
+  return typeof err.status === 'number' && err.status >= 500;
 }
 
 /** 指数退避 + jitter */
-export function computeBackoff(attempt, { baseDelayMs, maxDelayMs, jitterRatio }) {
+export function computeBackoff(attempt: number, { baseDelayMs, maxDelayMs, jitterRatio }: RetryPolicy): number {
   const exp = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
   const jitter = Math.random() * exp * jitterRatio;
   return Math.floor(exp + jitter);
 }
 
 /** 可被取消打断的 sleep */
-function sleep(ms, cancelNode) {
+function sleep(ms: number, cancelNode?: CancelNode): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
     if (!cancelNode) return;
@@ -90,9 +124,13 @@ function sleep(ms, cancelNode) {
  * @param {number} timeoutMs
  * @param {import('./cancelTree.js').CancelNode} cancelNode
  */
-export async function withTimeout(task, timeoutMs, cancelNode) {
-  let timer;
-  const timeoutPromise = new Promise((_, reject) => {
+export async function withTimeout<T>(
+  task: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  cancelNode: CancelNode
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       cancelNode.cancel(CancelReason.TIMEOUT, `超过 ${timeoutMs}ms`);
       reject(createAppError('TOOL_TIMEOUT', `工具调用超时（>${timeoutMs}ms）`, '', 504));
@@ -102,7 +140,7 @@ export async function withTimeout(task, timeoutMs, cancelNode) {
   try {
     return await Promise.race([task(cancelNode.signal), timeoutPromise]);
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -120,12 +158,19 @@ export async function withTimeout(task, timeoutMs, cancelNode) {
  * @param {(info: {attempt: number, error?: Error, delayMs?: number}) => void} [params.onAttempt]
  * @returns {Promise<{result: any, attempts: number, durationMs: number}>}
  */
-export async function runWithPolicy({ toolName, task, parentNode, timeoutMs, policy = {}, onAttempt }) {
+export async function runWithPolicy<T>({
+  toolName,
+  task,
+  parentNode,
+  timeoutMs,
+  policy = {},
+  onAttempt
+}: RunWithPolicyInput<T>): Promise<RunWithPolicyResult<T>> {
   const merged = { ...DEFAULT_POLICY, ...policy };
   const effectiveTimeout = timeoutMs ?? TOOL_TIMEOUTS[toolName] ?? TOOL_TIMEOUTS.default;
   const startedAt = Date.now();
 
-  let lastError = null;
+  let lastError: unknown = null;
 
   for (let attempt = 0; attempt <= merged.retries; attempt++) {
     // 父节点已取消，直接放弃
@@ -138,12 +183,13 @@ export async function runWithPolicy({ toolName, task, parentNode, timeoutMs, pol
       const result = await withTimeout(task, effectiveTimeout, attemptNode);
       attemptNode.detach();
       return { result, attempts: attempt + 1, durationMs: Date.now() - startedAt };
-    } catch (error) {
+    } catch (error: unknown) {
       attemptNode.detach();
       lastError = error;
+      const err = toErrorWithCode(error);
 
       // 取消不重试，直接向上抛
-      if (error instanceof CancelledError || error?.code === 'CANCELLED') throw error;
+      if (error instanceof CancelledError || err.code === 'CANCELLED') throw error;
       // 父节点在本次尝试期间被取消（例如用户点停止），也不再重试
       if (parentNode.isCancelled) throw new CancelledError(parentNode.reason);
 
@@ -151,7 +197,7 @@ export async function runWithPolicy({ toolName, task, parentNode, timeoutMs, pol
       if (!canRetry) break;
 
       const delayMs = computeBackoff(attempt, merged);
-      onAttempt?.({ attempt: attempt + 1, error, delayMs });
+      onAttempt?.({ attempt: attempt + 1, error: err, delayMs });
       await sleep(delayMs, parentNode);
     }
   }

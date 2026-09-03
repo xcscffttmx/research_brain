@@ -4,7 +4,7 @@ import type { AgentRunRow, AgentRunStatus, ToolCallRow, ToolCallStatus } from '.
 
 export interface AgentRun extends AgentRunRow {
   /** plan_json 解析后的结构化计划 */
-  plan: unknown[];
+  plan: unknown;
 }
 
 export interface ToolCall extends ToolCallRow {
@@ -15,7 +15,7 @@ export interface ToolCall extends ToolCallRow {
 export interface StartRunInput {
   sessionId: string;
   messageId?: string | null;
-  plan?: unknown[];
+  plan?: unknown;
 }
 
 export interface StartToolCallInput {
@@ -40,11 +40,11 @@ export function startRun({ sessionId, messageId = null, plan = [] }: StartRunInp
 export function getRun(id: string): AgentRun | null {
   const row = getDb().prepare('select * from agent_runs where id = ?').get(id) as AgentRunRow | undefined;
   if (!row) return null;
-  return { ...row, plan: safeParse<unknown[]>(row.plan_json, []) };
+  return { ...row, plan: safeParse<unknown>(row.plan_json, []) };
 }
 
 /** Planner 产出计划后回填 */
-export function updateRunPlan(id: string, plan: unknown[]): AgentRun | null {
+export function updateRunPlan(id: string, plan: unknown): AgentRun | null {
   getDb().prepare('update agent_runs set plan_json = ? where id = ?').run(JSON.stringify(plan), id);
   return getRun(id);
 }
@@ -72,7 +72,7 @@ export function listRunsBySession(sessionId: string, limit = 20): AgentRun[] {
     getDb()
       .prepare('select * from agent_runs where session_id = ? order by started_at desc limit ?')
       .all(sessionId, limit) as AgentRunRow[]
-  ).map((row) => ({ ...row, plan: safeParse<unknown[]>(row.plan_json, []) }));
+  ).map((row) => ({ ...row, plan: safeParse<unknown>(row.plan_json, []) }));
 }
 
 // ---------- tool_calls ----------

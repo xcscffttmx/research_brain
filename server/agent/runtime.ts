@@ -1,23 +1,109 @@
 import { createCancelRoot, CancelReason, CancelledError } from './cancelTree.js';
+import type { CancelNode, CancelNodeReason, CancelReasonCode } from './cancelTree.js';
 import { createPlan, createDirectAnswerPlan } from './planner.js';
+import type { AgentPlan } from './planner.js';
 import { executePlan } from './executor.js';
+import type { ExecutePlanResult, ExecutionResultItem, FailedStep } from './executor.js';
 import * as agentRunRepo from '../repositories/agentRunRepo.js';
 
 /** 该工具不走 MCP，交给注入的 Agentic RAG 链路执行 */
 const RAG_TOOL_NAME = 'retrieve_knowledge';
 
+interface RuntimeEmit {
+  status?: (stage: string, detail?: Record<string, unknown>) => boolean;
+  send?: (event: string, payload?: Record<string, unknown>) => boolean;
+  delta?: (text: string) => boolean;
+  error?: (payload: Record<string, unknown>) => boolean;
+  toolCall?: (payload: Record<string, unknown>) => boolean;
+  toolResult?: (payload: Record<string, unknown>) => boolean;
+}
+
+interface MinimalCancelNode {
+  signal: AbortSignal;
+  readonly isCancelled: boolean;
+  throwIfCancelled: () => void;
+}
+
+interface RagCitation {
+  index?: number;
+  [key: string]: unknown;
+}
+
+interface RagResult {
+  needsRetrieval: boolean;
+  citations: RagCitation[];
+  hops?: unknown;
+  degraded?: boolean;
+}
+
+interface GeneratedAnswer {
+  answer?: string;
+  verification?: unknown;
+  citations?: RagCitation[];
+}
+
+interface RuntimeDeps {
+  qwenFetch: (endpoint: string, body: Record<string, unknown>) => Promise<unknown>;
+  callTool: (toolName: string, args: unknown, signal: AbortSignal) => Promise<unknown>;
+  runRag?: (params: {
+    question: string;
+    runId: string;
+    emit?: RuntimeEmit;
+    cancelNode: MinimalCancelNode;
+    persist: boolean;
+  }) => Promise<RagResult>;
+  generateAnswer: (
+    ctx: {
+      question: string;
+      contextHint: string;
+      plan: AgentPlan;
+      toolResults: ExecutionResultItem[];
+      failedSteps: FailedStep[];
+      scratchpad: Record<string, unknown>;
+      citations: RagCitation[];
+    },
+    signal: AbortSignal,
+    onDelta: (delta: string) => boolean | undefined,
+    meta: { runId: string; emit?: RuntimeEmit; cancelNode: CancelNode; persist: boolean }
+  ) => Promise<string | GeneratedAnswer | null | undefined>;
+}
+
+export interface RunAgentTurnInput {
+  sessionId: string;
+  question: string;
+  assistantMessageId?: string | null;
+  contextHint?: string;
+  emit?: RuntimeEmit;
+  externalSignal?: AbortSignal;
+  deps: RuntimeDeps;
+  persist?: boolean;
+}
+
+interface RuntimeError extends Error {
+  code?: string;
+  details?: string;
+  reason?: CancelNodeReason;
+}
+
+function toRuntimeError(error: unknown): RuntimeError {
+  if (error instanceof Error) return error as RuntimeError;
+  return new Error(String(error || '未知错误')) as RuntimeError;
+}
+
 /**
  * 把 AbortSignal 包成 CancelNode 的最小接口。
  * Executor 只把 signal 传给工具，而 RAG 链路需要 throwIfCancelled 语义。
  */
-function nodeFromSignal(signal) {
+function nodeFromSignal(signal: AbortSignal): MinimalCancelNode {
   return {
     signal,
     get isCancelled() {
       return Boolean(signal?.aborted);
     },
     throwIfCancelled() {
-      if (signal?.aborted) throw new CancelledError({ code: CancelReason.USER_ABORT, detail: '上游已取消' });
+      if (signal?.aborted) {
+        throw new CancelledError({ code: CancelReason.USER_ABORT, detail: '上游已取消', nodeId: 'external-signal' });
+      }
     }
   };
 }
@@ -36,10 +122,14 @@ function nodeFromSignal(signal) {
  */
 
 /** 运行中的 run 索引，供「停止」接口按 runId 精确取消 */
-const activeRuns = new Map();
+const activeRuns = new Map<string, CancelNode>();
 
 /** 按 runId 取消一次运行（HTTP 层的 /api/chat/abort 用） */
-export function abortRun(runId, reason = CancelReason.USER_ABORT, detail = '用户主动停止') {
+export function abortRun(
+  runId: string,
+  reason: CancelReasonCode = CancelReason.USER_ABORT,
+  detail = '用户主动停止'
+): boolean {
   const node = activeRuns.get(runId);
   if (!node) return false;
   node.cancel(reason, detail);
@@ -47,7 +137,7 @@ export function abortRun(runId, reason = CancelReason.USER_ABORT, detail = '用�
 }
 
 /** 当前活跃 run 数（健康检查/泄漏排查用） */
-export function getActiveRunCount() {
+export function getActiveRunCount(): number {
   return activeRuns.size;
 }
 
@@ -76,16 +166,17 @@ export async function runAgentTurn({
   externalSignal,
   deps,
   persist = true
-}) {
+}: RunAgentTurnInput) {
   const { qwenFetch, callTool, generateAnswer, runRag } = deps;
 
-  let run = null;
-  let cancelRoot = null;
+  let run: { id: string } | null = null;
+  let cancelRoot: CancelNode | null = null;
 
   try {
     // ---------- 1. 建立 run 与取消树 ----------
     if (persist) {
       run = agentRunRepo.startRun({ sessionId, messageId: assistantMessageId });
+      if (!run) throw new Error('创建 Agent run 失败');
     } else {
       run = { id: `run-local-${Date.now()}` };
     }
@@ -99,7 +190,7 @@ export async function runAgentTurn({
     emit?.status?.('planning', {});
     const planNode = cancelRoot.child('planner');
 
-    let plan;
+    let plan: AgentPlan;
     try {
       plan = await createPlan({
         question,
@@ -121,7 +212,7 @@ export async function runAgentTurn({
     cancelRoot.throwIfCancelled();
 
     // ---------- 3. 执行工具链 ----------
-    let execution = { scratchpad: {}, results: [], failedSteps: [], aborted: false };
+    let execution: ExecutePlanResult = { scratchpad: {}, results: [], failedSteps: [], aborted: false };
 
     if (plan.needsTools && plan.steps.length) {
       emit?.status?.('executing', { totalSteps: plan.steps.length });
@@ -158,7 +249,7 @@ export async function runAgentTurn({
           citations
         },
         answerNode.signal,
-        (delta) => emit?.delta?.(delta),
+        (delta: string) => emit?.delta?.(delta),
         { runId: run.id, emit, cancelNode: answerNode, persist }
       );
 
@@ -190,35 +281,36 @@ export async function runAgentTurn({
       failedSteps: execution.failedSteps,
       partial: execution.aborted
     };
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = toRuntimeError(error);
     // 取消树已 abort 时，即使底层抛的是 fetch 的 AbortError，也应记为 cancelled
     const cancelled = isCancellation(error) || Boolean(cancelRoot?.isCancelled);
     const status = cancelled ? 'cancelled' : 'failed';
 
     if (persist && run) {
       agentRunRepo.finishRun(run.id, status, {
-        errorCode: error?.code || (cancelled ? 'CANCELLED' : 'UNKNOWN'),
-        errorMsg: error?.message || ''
+        errorCode: err.code || (cancelled ? 'CANCELLED' : 'UNKNOWN'),
+        errorMsg: err.message || ''
       });
     }
 
     if (cancelled) {
       emit?.status?.('cancelled', {
         runId: run?.id,
-        reason: error?.reason?.code || cancelRoot?.reason?.code
+        reason: err.reason?.code || cancelRoot?.reason?.code
       });
     } else {
       emit?.error?.({
-        code: error?.code || 'AGENT_RUN_FAILED',
-        message: error?.message || 'Agent 执行失败',
-        details: error?.details || ''
+        code: err.code || 'AGENT_RUN_FAILED',
+        message: err.message || 'Agent 执行失败',
+        details: err.details || ''
       });
     }
 
     return {
       runId: run?.id,
       status,
-      error: { code: error?.code, message: error?.message },
+      error: { code: err.code, message: err.message },
       answer: ''
     };
   } finally {
@@ -230,19 +322,35 @@ export async function runAgentTurn({
   }
 }
 
-function isCancellation(error) {
-  return error instanceof CancelledError || error?.code === 'CANCELLED';
+function isCancellation(error: unknown): boolean {
+  const err = toRuntimeError(error);
+  return error instanceof CancelledError || err.code === 'CANCELLED';
 }
 
 /**
  * 工具分发：retrieve_knowledge 交给 Agentic RAG，其余走 MCP。
  * 仍然经过 Executor 的 Timeout/Retry 与取消树，行为与普通工具一致。
  */
-function buildToolDispatcher({ callTool, runRag, question, runId, emit, persist }) {
-  return async (toolName, args, signal) => {
+function buildToolDispatcher({
+  callTool,
+  runRag,
+  question,
+  runId,
+  emit,
+  persist
+}: {
+  callTool: RuntimeDeps['callTool'];
+  runRag?: RuntimeDeps['runRag'];
+  question: string;
+  runId: string;
+  emit?: RuntimeEmit;
+  persist: boolean;
+}) {
+  return async (toolName: string, args: unknown, signal: AbortSignal): Promise<unknown> => {
+    const toolArgs = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
     if (runRag && toolName === RAG_TOOL_NAME) {
       const result = await runRag({
-        question: args?.query || question,
+        question: typeof toolArgs.query === 'string' ? toolArgs.query : question,
         runId,
         emit,
         cancelNode: nodeFromSignal(signal),
@@ -264,10 +372,11 @@ function buildToolDispatcher({ callTool, runRag, question, runId, emit, persist 
 }
 
 /** 从工具结果里取出 RAG 证据（带 index 的才是 Agentic RAG 产出） */
-function collectRagCitations(results = []) {
+function collectRagCitations(results: ExecutionResultItem[] = []): RagCitation[] {
   for (const item of results) {
     if (item.tool !== RAG_TOOL_NAME) continue;
-    const citations = item.result?.citations;
+    const result = item.result && typeof item.result === 'object' ? (item.result as { citations?: unknown }) : {};
+    const citations = result.citations;
     if (Array.isArray(citations) && citations.length) return citations;
   }
   return [];

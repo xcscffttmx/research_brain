@@ -1,6 +1,66 @@
 import { CancelledError } from './cancelTree.js';
+import type { CancelNode } from './cancelTree.js';
 import { runWithPolicy } from './policy.js';
+import type { RetryPolicy } from './policy.js';
+import type { AgentPlan } from './planner.js';
 import * as agentRunRepo from '../repositories/agentRunRepo.js';
+import type { ToolCallStatus } from '../db/types.js';
+
+type JsonLike = unknown;
+type Scratchpad = Record<string, unknown>;
+
+interface ErrorWithCode extends Error {
+  code?: string;
+}
+
+interface AgentEmit {
+  toolCall?: (payload: Record<string, unknown>) => boolean;
+  toolResult?: (payload: Record<string, unknown>) => boolean;
+  status?: (stage: string, detail?: Record<string, unknown>) => boolean;
+}
+
+interface ExecutePlanInput {
+  plan: AgentPlan;
+  runId: string;
+  cancelNode: CancelNode;
+  callTool: (toolName: string, args: JsonLike, signal: AbortSignal) => Promise<unknown>;
+  emit?: AgentEmit;
+  persist?: boolean;
+  timeoutMs?: number;
+  policy?: Partial<RetryPolicy>;
+}
+
+export interface ExecutionResultItem {
+  step: number;
+  tool: string;
+  status: 'succeeded';
+  result: unknown;
+  attempts: number;
+  durationMs: number;
+}
+
+export interface FailedStep {
+  step: number;
+  tool: string;
+  code?: string;
+  message?: string;
+}
+
+export interface ExecutePlanResult {
+  scratchpad: Scratchpad;
+  results: ExecutionResultItem[];
+  failedSteps: FailedStep[];
+  aborted: boolean;
+}
+
+function toErrorWithCode(error: unknown): ErrorWithCode {
+  if (error instanceof Error) return error as ErrorWithCode;
+  return new Error(String(error || '未知错误')) as ErrorWithCode;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
 
 /**
  * Executor —— 逐步执行 Planner 产出的计划。
@@ -16,7 +76,7 @@ import * as agentRunRepo from '../repositories/agentRunRepo.js';
  * 参数插值：允许 Planner 在 args 里用 {{step1.paperIds}} 引用前序步骤结果。
  * 这是「结果回填」的具体实现。
  */
-export function resolveArgs(args, scratchpad) {
+export function resolveArgs(args: JsonLike, scratchpad: Scratchpad): JsonLike {
   if (args === null || args === undefined) return args;
 
   if (typeof args === 'string') {
@@ -32,7 +92,7 @@ export function resolveArgs(args, scratchpad) {
   if (Array.isArray(args)) return args.map((item) => resolveArgs(item, scratchpad));
 
   if (typeof args === 'object') {
-    const out = {};
+    const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(args)) {
       out[key] = resolveArgs(value, scratchpad);
     }
@@ -43,16 +103,17 @@ export function resolveArgs(args, scratchpad) {
 }
 
 /** 按 a.b[0].c 形式读取嵌套值 */
-export function readPath(source, path) {
+export function readPath(source: unknown, path: string): unknown {
   const segments = path
     .replace(/\[(\d+)\]/g, '.$1')
     .split('.')
     .filter(Boolean);
 
-  let current = source;
+  let current: unknown = source;
   for (const segment of segments) {
     if (current === null || current === undefined) return undefined;
-    current = current[segment];
+    if (typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
   }
   return current;
 }
@@ -71,10 +132,19 @@ export function readPath(source, path) {
  * @param {object} [params.policy] 覆盖重试策略
  * @returns {Promise<{scratchpad: object, results: Array, failedSteps: Array}>}
  */
-export async function executePlan({ plan, runId, cancelNode, callTool, emit, persist = true, timeoutMs, policy }) {
-  const scratchpad = {};
-  const results = [];
-  const failedSteps = [];
+export async function executePlan({
+  plan,
+  runId,
+  cancelNode,
+  callTool,
+  emit,
+  persist = true,
+  timeoutMs,
+  policy
+}: ExecutePlanInput): Promise<ExecutePlanResult> {
+  const scratchpad: Scratchpad = {};
+  const results: ExecutionResultItem[] = [];
+  const failedSteps: FailedStep[] = [];
 
   for (const step of plan.steps) {
     cancelNode.throwIfCancelled();
@@ -88,7 +158,7 @@ export async function executePlan({ plan, runId, cancelNode, callTool, emit, per
         runId,
         stepIndex: step.step,
         toolName: step.tool,
-        args: resolvedArgs
+        args: toRecord(resolvedArgs)
       });
     }
 
@@ -101,7 +171,7 @@ export async function executePlan({ plan, runId, cancelNode, callTool, emit, per
     });
 
     try {
-      const { result, attempts, durationMs } = await runWithPolicy({
+      const { result, attempts, durationMs } = await runWithPolicy<unknown>({
         toolName: step.tool,
         parentNode: stepNode,
         timeoutMs,
@@ -140,13 +210,14 @@ export async function executePlan({ plan, runId, cancelNode, callTool, emit, per
       });
 
       stepNode.detach();
-    } catch (error) {
+    } catch (error: unknown) {
       stepNode.detach();
+      const err = toErrorWithCode(error);
 
       // 取消要立刻向上传播，不能被 optional 吞掉
-      if (error instanceof CancelledError || error?.code === 'CANCELLED') {
+      if (error instanceof CancelledError || err.code === 'CANCELLED') {
         if (persist && toolCallId) {
-          agentRunRepo.finishToolCall(toolCallId, 'cancelled', { errorMsg: error.message });
+          agentRunRepo.finishToolCall(toolCallId, 'cancelled', { errorMsg: err.message });
         }
         emit?.toolResult?.({
           id: toolCallId || `step-${step.step}`,
@@ -157,18 +228,18 @@ export async function executePlan({ plan, runId, cancelNode, callTool, emit, per
         throw error;
       }
 
-      const status = error?.code === 'TOOL_TIMEOUT' ? 'timeout' : 'failed';
-      failedSteps.push({ step: step.step, tool: step.tool, code: error?.code, message: error?.message });
+      const status: ToolCallStatus = err.code === 'TOOL_TIMEOUT' ? 'timeout' : 'failed';
+      failedSteps.push({ step: step.step, tool: step.tool, code: err.code, message: err.message });
 
       if (persist && toolCallId) {
-        agentRunRepo.finishToolCall(toolCallId, status, { errorMsg: error?.message || '' });
+        agentRunRepo.finishToolCall(toolCallId, status, { errorMsg: err.message || '' });
       }
 
       emit?.toolResult?.({
         id: toolCallId || `step-${step.step}`,
         name: step.tool,
         status,
-        errorMsg: error?.message,
+        errorMsg: err.message,
         stepIndex: step.step
       });
 

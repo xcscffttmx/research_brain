@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createAppError } from '../lib/errors.js';
 import { qwenConfig } from '../lib/config.js';
+import type { CancelNode } from './cancelTree.js';
 
 /**
  * Planner —— 让模型先想清楚"要做什么"，再由 Executor 去做。
@@ -96,6 +97,16 @@ export const planSchema = z.object({
   stopWhen: z.string().default('所有步骤执行完毕')
 });
 
+export type PlanStep = z.infer<typeof planStepSchema>;
+export type AgentPlan = z.infer<typeof planSchema>;
+
+interface CreatePlanInput {
+  question: string;
+  contextHint?: string;
+  cancelNode?: CancelNode;
+  qwenFetch: (endpoint: string, body: Record<string, unknown>) => Promise<unknown>;
+}
+
 const PLANNER_SYSTEM_PROMPT = `你是科研问答 Agent 的规划器。你的任务是把用户问题拆成可执行的工具调用计划。
 
 规则：
@@ -114,7 +125,7 @@ function buildToolCatalogText() {
 }
 
 /** 从模型输出里抠出 JSON 对象（兼容被 markdown 包裹的情况） */
-export function extractJsonObject(text) {
+export function extractJsonObject(text: string): unknown {
   if (!text) throw createAppError('PLAN_EMPTY', 'Planner 返回为空', '', 502);
 
   const fenced = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/```\s*([\s\S]*?)```/i);
@@ -134,7 +145,7 @@ export function extractJsonObject(text) {
 }
 
 /** 计划为空时的兜底：直接回答 */
-export function createDirectAnswerPlan(intent = '直接回答') {
+export function createDirectAnswerPlan(intent = '直接回答'): AgentPlan {
   return { needsTools: false, intent, steps: [], stopWhen: '无需工具，直接生成答案' };
 }
 
@@ -148,7 +159,12 @@ export function createDirectAnswerPlan(intent = '直接回答') {
  * @param {(endpoint: string, body: object) => Promise<any>} params.qwenFetch 注入以便测试
  * @returns {Promise<z.infer<typeof planSchema>>}
  */
-export async function createPlan({ question, contextHint = '', cancelNode, qwenFetch }) {
+export async function createPlan({
+  question,
+  contextHint = '',
+  cancelNode,
+  qwenFetch
+}: CreatePlanInput): Promise<AgentPlan> {
   cancelNode?.throwIfCancelled();
 
   const userPrompt = [
@@ -169,7 +185,7 @@ export async function createPlan({ question, contextHint = '', cancelNode, qwenF
     ]
   });
 
-  const raw = completion?.choices?.[0]?.message?.content ?? '';
+  const raw = readPlannerContent(completion);
   const parsed = extractJsonObject(raw);
   const validated = planSchema.safeParse(parsed);
 
@@ -188,4 +204,16 @@ export async function createPlan({ question, contextHint = '', cancelNode, qwenF
   if (!plan.needsTools && plan.steps.length > 0) plan.needsTools = true;
 
   return plan;
+}
+
+function readPlannerContent(completion: unknown): string {
+  if (!completion || typeof completion !== 'object' || !('choices' in completion)) return '';
+  const choices = (completion as { choices?: unknown }).choices;
+  if (!Array.isArray(choices)) return '';
+  const first = choices[0];
+  if (!first || typeof first !== 'object' || !('message' in first)) return '';
+  const message = (first as { message?: unknown }).message;
+  if (!message || typeof message !== 'object' || !('content' in message)) return '';
+  const content = (message as { content?: unknown }).content;
+  return typeof content === 'string' ? content : '';
 }
