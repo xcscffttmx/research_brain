@@ -4,6 +4,7 @@ import cors from 'cors';
 import multer from 'multer';
 import dotenv from 'dotenv';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -146,9 +147,12 @@ async function createMcpSession(): Promise<McpSession> {
       return arg.includes('tsx');
     });
 
+    const mcpSourceEntry = path.resolve(__dirname, './mcp-server.ts');
+    const mcpCompiledEntry = path.resolve(__dirname, './mcp-server.js');
+
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [...loaderArgs, path.resolve(__dirname, './mcp-server.js')],
+      args: [...loaderArgs, existsSync(mcpSourceEntry) ? mcpSourceEntry : mcpCompiledEntry],
       cwd: path.resolve(__dirname, '..'),
       env: {
         ...process.env,

@@ -14,17 +14,147 @@ import { searchArxiv } from './lib/apiClients/arxiv.js';
 import { searchSemanticScholar } from './lib/apiClients/semanticScholar.js';
 import { searchOpenAlex } from './lib/apiClients/openAlex.js';
 import * as chunkRepo from './repositories/chunkRepo.js';
+import type { VectorSearchHit } from './repositories/chunkRepo.js';
+import type { PaperInput } from './repositories/paperRepo.js';
+
+type PdfParser = (buffer: Buffer) => Promise<{ text: string }>;
+type MammothParser = { extractRawText(input: { buffer: Buffer }): Promise<{ value: string }> };
+
+interface AgentInfo {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+}
+
+interface PaperSchema {
+  title: string;
+  problem: string;
+  method: string;
+  architecture: string;
+  dataset: string[];
+  metrics: string[];
+  conclusion: string;
+  limitations: string[];
+}
+
+interface PaperSchemaMemoryRecord {
+  paperId: string;
+  source?: string;
+  title: string;
+  schema: PaperSchema;
+  updatedAt?: number;
+}
+
+interface ScoredPaperSchemaRecord extends PaperSchemaMemoryRecord {
+  score: number;
+}
+
+interface ResearchGap {
+  opportunity: string;
+  rationale: string;
+  supportingPaperIds: string[];
+  confidence: number;
+}
+
+interface ExperimentSpec {
+  baseline: string;
+  proposed_change: string;
+  dataset: string;
+  metrics: string[];
+  training_plan: {
+    epochs: number;
+    optimizer: string;
+    learning_rate: string;
+    batch_size: number;
+    notes: string;
+  };
+  ablation_plan: string[];
+  evidenceRefs: Array<{ paperId: string; title: string; reason: string }>;
+}
+
+interface UploadedDocument {
+  name: string;
+  content: string;
+  isBinary?: boolean;
+}
+
+interface CitationInput {
+  author: string;
+  title: string;
+  year: number;
+  journal?: string;
+}
+
+interface CollaborationSubtask {
+  id: string;
+  title: string;
+  agent: string;
+}
+
+interface LiteratureWarning {
+  source: string;
+  code: string;
+  message: string;
+  details: string;
+}
+
+interface TextChunk {
+  text: string;
+  spanStart: number;
+  spanEnd: number;
+}
+
+interface KnowledgeCitation {
+  id: string;
+  title: string;
+  snippet: string;
+  source: string;
+  score: number;
+}
+
+interface McpTextResult {
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent: Record<string, unknown>;
+  isError?: boolean;
+}
+
+interface AppErrorLike extends Error {
+  code?: string;
+  details?: string;
+}
+
+interface State {
+  agentState: Record<string, Record<string, unknown>>;
+  literature: {
+    categories: Array<Record<string, unknown>>;
+    tags: Array<Record<string, unknown>>;
+    papers: PaperInput[];
+    paperSchemas: Record<string, PaperSchemaMemoryRecord>;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object');
+}
+
+function toAppError(error: unknown, fallbackMessage = '未知错误'): AppErrorLike {
+  if (error instanceof Error) return error as AppErrorLike;
+  return new Error(String(error || fallbackMessage)) as AppErrorLike;
+}
 
 // 尝试导入PDF和DOCX处理库
-let pdf = null;
-let mammoth = null;
+let pdf: PdfParser | null = null;
+let mammoth: MammothParser | null = null;
 
 async function loadLibraries() {
   try {
-    const pdfParse = await import('pdf-parse');
-    pdf = pdfParse.default || pdfParse;
+    const pdfParse = (await import('pdf-parse')) as unknown as PdfParser & { default?: PdfParser };
+    pdf = typeof pdfParse.default === 'function' ? pdfParse.default : pdfParse;
     const mammothImport = await import('mammoth');
-    mammoth = mammothImport.default || mammothImport;
+    mammoth = (
+      isRecord(mammothImport) && isRecord(mammothImport.default) ? mammothImport.default : mammothImport
+    ) as MammothParser;
     console.log('PDF和DOCX处理库加载成功');
   } catch (error) {
     console.error('PDF和DOCX处理库加载失败:', error);
@@ -37,7 +167,7 @@ dotenv.config({ path: rootEnvPath, override: true });
 dotenv.config({ override: false });
 
 // Agent 定义
-const agents = {
+const agents: Record<string, AgentInfo> = {
   文献检索: {
     id: 'literature-agent',
     name: '文献检索 Agent',
@@ -59,7 +189,7 @@ const agents = {
 };
 
 // 知识库文档与分块已迁移到 SQLite（documents / chunks / chunk_vectors），此处只保留文献缓存等易变状态
-const state = {
+const state: State = {
   agentState: {},
   literature: {
     categories: [],
@@ -75,19 +205,19 @@ const dataDir = path.resolve(process.cwd(), '.data');
 const knowledgeStateFile = path.join(dataDir, 'knowledge-state.json');
 
 // 只持久化文献缓存；文档与向量走 SQLite
-async function persistState() {
+async function persistState(): Promise<void> {
   await fs.mkdir(dataDir, { recursive: true });
   await fs.writeFile(knowledgeStateFile, JSON.stringify({ literature: state.literature }), 'utf-8');
 }
 
-async function hydrateState() {
+async function hydrateState(): Promise<void> {
   if (!existsSync(knowledgeStateFile)) {
     return;
   }
 
   try {
     const raw = await fs.readFile(knowledgeStateFile, 'utf-8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as { literature?: Partial<State['literature']> };
     state.literature.categories = Array.isArray(parsed?.literature?.categories) ? parsed.literature.categories : [];
     state.literature.tags = Array.isArray(parsed?.literature?.tags) ? parsed.literature.tags : [];
     state.literature.papers = Array.isArray(parsed?.literature?.papers) ? parsed.literature.papers : [];
@@ -108,8 +238,8 @@ async function hydrateState() {
 /**
  * 定长滑窗分块。返回带原文区间的对象，供证据溯源定位原文位置。
  */
-function chunkText(text, chunkSize = 900, overlap = 160) {
-  const chunks = [];
+function chunkText(text: string, chunkSize = 900, overlap = 160): TextChunk[] {
+  const chunks: TextChunk[] = [];
   let start = 0;
   while (start < text.length) {
     const end = Math.min(text.length, start + chunkSize);
@@ -125,7 +255,7 @@ function chunkText(text, chunkSize = 900, overlap = 160) {
   return chunks;
 }
 
-function buildCitation(row) {
+function buildCitation(row: VectorSearchHit): KnowledgeCitation {
   return {
     id: row.chunkId,
     title: row.documentName,
@@ -138,7 +268,7 @@ function buildCitation(row) {
 /** 单条相似度下限：低于该值的召回视为噪声 */
 const MIN_VECTOR_SCORE = 0.15;
 
-async function searchKnowledge(query, topK = 4) {
+async function searchKnowledge(query: string, topK = 4): Promise<KnowledgeCitation[]> {
   if (!chunkRepo.countChunks()) {
     return [];
   }
@@ -150,8 +280,8 @@ async function searchKnowledge(query, topK = 4) {
     .map(buildCitation);
 }
 
-function cacheLiteraturePapers(rows) {
-  const merged = new Map();
+function cacheLiteraturePapers(rows: PaperInput[]): void {
+  const merged = new Map<string, PaperInput>();
   for (const paper of state.literature.papers) {
     merged.set(`${paper.source}:${paper.paperId}`, paper);
   }
@@ -161,11 +291,11 @@ function cacheLiteraturePapers(rows) {
   state.literature.papers = Array.from(merged.values());
 }
 
-function findCachedPaper(paperId) {
+function findCachedPaper(paperId: string): PaperInput | undefined {
   return state.literature.papers.find((paper) => paper.paperId === paperId);
 }
 
-function draftFindingsFromAbstract(abstract) {
+function draftFindingsFromAbstract(abstract: string): string[] {
   const parts = normalizeWhitespace(abstract)
     .split(/[.。!?！？]/)
     .map((line) => line.trim())
@@ -187,7 +317,7 @@ const paperSchemaShape = z.object({
   limitations: z.array(z.string())
 });
 
-function extractJsonObject(text) {
+function extractJsonObject(text: string): unknown {
   if (!text) {
     throw createAppError('SCHEMA_EMPTY', '模型返回为空', '请稍后重试。', 502);
   }
@@ -209,7 +339,7 @@ function extractJsonObject(text) {
   }
 }
 
-function getPaperById(paperId) {
+function getPaperById(paperId: string): PaperInput {
   const paper = findCachedPaper(paperId);
   if (!paper) {
     throw createAppError('PAPER_NOT_FOUND', '未找到指定文献', '请先调用 search_literature 并使用返回的 paperId。', 404);
@@ -217,7 +347,7 @@ function getPaperById(paperId) {
   return paper;
 }
 
-async function generatePaperSchema(paper) {
+async function generatePaperSchema(paper: PaperInput): Promise<PaperSchema> {
   const prompt = [
     '你是科研论文结构化抽取助手。',
     '请仅输出一个 JSON 对象，不要输出任何解释文字，不要使用 markdown 代码块。',
@@ -241,7 +371,13 @@ async function generatePaperSchema(paper) {
     ]
   });
 
-  const content = completion?.choices?.[0]?.message?.content || '';
+  const content = isRecord(completion)
+    ? String(
+        ((completion.choices as Array<{ message?: { content?: string } }> | undefined)?.[0]?.message?.content as
+          | string
+          | undefined) || ''
+      )
+    : '';
   const parsed = extractJsonObject(content);
   const validated = paperSchemaShape.safeParse(parsed);
   if (!validated.success) {
@@ -250,7 +386,7 @@ async function generatePaperSchema(paper) {
   return validated.data;
 }
 
-function buildSchemaSearchText(record) {
+function buildSchemaSearchText(record: PaperSchemaMemoryRecord): string {
   const schema = record?.schema || {};
   return [
     record?.title || '',
@@ -266,7 +402,7 @@ function buildSchemaSearchText(record) {
     .toLowerCase();
 }
 
-function splitKeywords(query) {
+function splitKeywords(query: unknown): string[] {
   return String(query || '')
     .toLowerCase()
     .split(/[\s，。；：！？、,.!?;:/\\|]+/)
@@ -274,10 +410,10 @@ function splitKeywords(query) {
     .filter((part) => part.length > 1);
 }
 
-function summarizePaperMemory(matches, query) {
-  const methods = new Set();
-  const limitations = new Set();
-  const datasets = new Set();
+function summarizePaperMemory(matches: PaperSchemaMemoryRecord[], query: string): Record<string, unknown> {
+  const methods = new Set<string>();
+  const limitations = new Set<string>();
+  const datasets = new Set<string>();
 
   for (const item of matches) {
     const schema = item.schema;
@@ -295,7 +431,7 @@ function summarizePaperMemory(matches, query) {
   };
 }
 
-function buildMemoryCitations(matches) {
+function buildMemoryCitations(matches: ScoredPaperSchemaRecord[]): KnowledgeCitation[] {
   return matches.slice(0, 6).map((item, index) => ({
     id: `memory-${index + 1}`,
     title: item.title,
@@ -314,8 +450,11 @@ const researchGapShape = z.object({
   confidence: z.number().min(0).max(1)
 });
 
-function countItems(records, picker) {
-  const counter = new Map();
+function countItems(
+  records: PaperSchemaMemoryRecord[],
+  picker: (record: PaperSchemaMemoryRecord) => string[]
+): Map<string, number> {
+  const counter = new Map<string, number>();
   for (const record of records) {
     const values = picker(record).filter(Boolean);
     for (const value of values) {
@@ -325,7 +464,7 @@ function countItems(records, picker) {
   return counter;
 }
 
-function collectSupportingPapers(records, keyword) {
+function collectSupportingPapers(records: PaperSchemaMemoryRecord[], keyword: string): string[] {
   const key = String(keyword || '').toLowerCase();
   return records
     .filter((record) => buildSchemaSearchText(record).includes(key))
@@ -333,7 +472,12 @@ function collectSupportingPapers(records, keyword) {
     .slice(0, 6);
 }
 
-function normalizeGap(opportunity, rationale, supportingPaperIds, confidence) {
+function normalizeGap(
+  opportunity: string,
+  rationale: string,
+  supportingPaperIds: string[],
+  confidence: number
+): ResearchGap {
   return researchGapShape.parse({
     opportunity,
     rationale,
@@ -342,12 +486,12 @@ function normalizeGap(opportunity, rationale, supportingPaperIds, confidence) {
   });
 }
 
-function mineResearchGaps(records, focus = '') {
+function mineResearchGaps(records: PaperSchemaMemoryRecord[], focus = ''): ResearchGap[] {
   const methodCount = countItems(records, (record) => [record.schema.method]);
   const datasetCount = countItems(records, (record) => record.schema.dataset || []);
   const limitationCount = countItems(records, (record) => record.schema.limitations || []);
 
-  const opportunities = [];
+  const opportunities: ResearchGap[] = [];
   const focusKeywords = splitKeywords(focus);
 
   const underExploredMethods = Array.from(methodCount.entries())
@@ -436,19 +580,23 @@ const experimentSpecShape = z.object({
   )
 });
 
-function pickPrimaryDataset(records) {
+function pickPrimaryDataset(records: PaperSchemaMemoryRecord[]): string {
   const counts = countItems(records, (record) => record.schema.dataset || []);
   const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   return sorted[0]?.[0] || '待补充公开数据集';
 }
 
-function pickPrimaryMetric(records) {
+function pickPrimaryMetric(records: PaperSchemaMemoryRecord[]): string[] {
   const counts = countItems(records, (record) => record.schema.metrics || []);
   const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   return sorted.slice(0, 4).map(([name]) => name);
 }
 
-function buildEvidenceRefs(records, supportingPaperIds, opportunity) {
+function buildEvidenceRefs(
+  records: PaperSchemaMemoryRecord[],
+  supportingPaperIds: string[],
+  opportunity: string
+): ExperimentSpec['evidenceRefs'] {
   const byId = new Map(records.map((record) => [record.paperId, record]));
   return supportingPaperIds.slice(0, 6).map((paperId) => {
     const record = byId.get(paperId);
@@ -460,7 +608,7 @@ function buildEvidenceRefs(records, supportingPaperIds, opportunity) {
   });
 }
 
-function buildExperimentSpecFromGap(opportunityItem, records) {
+function buildExperimentSpecFromGap(opportunityItem: ResearchGap, records: PaperSchemaMemoryRecord[]): ExperimentSpec {
   const supportingRecords = records.filter((record) => opportunityItem.supportingPaperIds.includes(record.paperId));
   const candidateRecords = supportingRecords.length ? supportingRecords : records;
 
@@ -499,7 +647,15 @@ function buildExperimentSpecFromGap(opportunityItem, records) {
  * 把一篇文档写入知识库：先落文档行，再逐块生成向量后单事务写入。
  * 向量生成放在事务外，避免长时间持有写锁。
  */
-async function persistDocumentWithChunks({ name, content, source }) {
+async function persistDocumentWithChunks({
+  name,
+  content,
+  source
+}: {
+  name: string;
+  content: string;
+  source: string;
+}): Promise<NonNullable<ReturnType<typeof chunkRepo.createDocument>>> {
   const parts = chunkText(content);
   const items = [];
   for (const part of parts) {
@@ -514,12 +670,15 @@ async function persistDocumentWithChunks({ name, content, source }) {
     source
   });
 
+  if (!document) {
+    throw createAppError('DOCUMENT_CREATE_FAILED', '知识文件写入失败', '数据库未返回新建文档。', 500);
+  }
   chunkRepo.insertChunksWithVectors(document.id, items);
   return document;
 }
 
-async function ingestLiteratureByPaperIds(paperIds) {
-  const inserted = [];
+async function ingestLiteratureByPaperIds(paperIds: string[]): Promise<Array<Record<string, unknown>>> {
+  const inserted: Array<Record<string, unknown>> = [];
 
   for (const paperId of paperIds) {
     const paper = findCachedPaper(paperId);
@@ -539,7 +698,7 @@ async function ingestLiteratureByPaperIds(paperIds) {
       `- Paper ID: ${paper.paperId}`,
       `- Year: ${paper.year || 'N/A'}`,
       `- Venue: ${paper.venue || 'N/A'}`,
-      `- Authors: ${paper.authors.join(', ') || 'N/A'}`,
+      `- Authors: ${(paper.authors || []).join(', ') || 'N/A'}`,
       `- URL: ${paper.url || 'N/A'}`,
       `- PDF: ${paper.pdfUrl || 'N/A'}`,
       '',
@@ -571,9 +730,9 @@ async function ingestLiteratureByPaperIds(paperIds) {
   return inserted;
 }
 
-async function extractTextFromFile(document) {
+async function extractTextFromFile(document: UploadedDocument): Promise<string> {
   const name = document.name.toLowerCase();
-  let content = document.content;
+  const content = document.content;
   const isBinary = document.isBinary || false;
 
   if (name.endsWith('.pdf')) {
@@ -587,7 +746,7 @@ async function extractTextFromFile(document) {
       return pdfResult.text;
     } catch (error) {
       console.error(`处理PDF文件时出错:`, error);
-      throw createAppError('PDF_PROCESS_ERROR', 'PDF文件处理失败', error.message, 400);
+      throw createAppError('PDF_PROCESS_ERROR', 'PDF文件处理失败', toAppError(error).message, 400);
     }
   } else if (name.endsWith('.docx')) {
     // 处理DOCX文件
@@ -600,7 +759,7 @@ async function extractTextFromFile(document) {
       return docxResult.value;
     } catch (error) {
       console.error(`处理DOCX文件时出错:`, error);
-      throw createAppError('DOCX_PROCESS_ERROR', 'DOCX文件处理失败', error.message, 400);
+      throw createAppError('DOCX_PROCESS_ERROR', 'DOCX文件处理失败', toAppError(error).message, 400);
     }
   } else {
     // 其他文本文件直接返回
@@ -608,7 +767,7 @@ async function extractTextFromFile(document) {
   }
 }
 
-async function ingestDocuments(documents) {
+async function ingestDocuments(documents: UploadedDocument[]): Promise<Array<Record<string, unknown>>> {
   const supported = documents.filter((document) => /\.(txt|md|markdown|json|pdf|docx)$/i.test(document.name));
 
   if (!supported.length) {
@@ -645,7 +804,7 @@ async function ingestDocuments(documents) {
   return inserted;
 }
 
-function listDocuments() {
+function listDocuments(): Array<Record<string, unknown>> {
   return chunkRepo.listDocuments().map((document) => ({
     id: document.id,
     name: document.name,
@@ -654,7 +813,7 @@ function listDocuments() {
   }));
 }
 
-function getDocumentContent(id) {
+function getDocumentContent(id: string): Record<string, unknown> {
   const document = chunkRepo.getDocument(id);
   if (!document) {
     throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
@@ -667,19 +826,19 @@ function getDocumentContent(id) {
   };
 }
 
-async function deleteDocument(id) {
+async function deleteDocument(id: string): Promise<Record<string, unknown>> {
   if (!chunkRepo.deleteDocument(id)) {
     throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
   }
   return { ok: true, id };
 }
 
-async function clearDocuments() {
+async function clearDocuments(): Promise<Record<string, unknown>> {
   chunkRepo.clearAllDocuments();
   return { ok: true };
 }
 
-function toTextContent(value) {
+function toTextContent(value: unknown): McpTextResult {
   return {
     content: [
       {
@@ -687,22 +846,23 @@ function toTextContent(value) {
         text: JSON.stringify(value, null, 2)
       }
     ],
-    structuredContent: value
+    structuredContent: isRecord(value) ? value : { value }
   };
 }
 
-function toErrorContent(error) {
+function toErrorContent(error: unknown): McpTextResult {
+  const payload = toAppError(error);
   return {
     content: [
       {
         type: 'text',
-        text: error.details ? `${error.message}\n${error.details}` : error.message
+        text: payload.details ? `${payload.message}\n${payload.details}` : payload.message
       }
     ],
     structuredContent: {
-      code: error.code || 'UNKNOWN_ERROR',
-      message: error.message,
-      details: error.details || ''
+      code: payload.code || 'UNKNOWN_ERROR',
+      message: payload.message,
+      details: payload.details || ''
     },
     isError: true
   };
@@ -711,7 +871,12 @@ function toErrorContent(error) {
 const server = new McpServer({
   name: 'research-agent-mcp-server',
   version: '1.0.0'
-});
+}) as unknown as {
+  // MCP SDK 的 registerTool 泛型很重，这里只在注册适配层保留动态 payload。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registerTool: (name: string, config: unknown, handler: (args: any, extra?: any) => unknown) => void;
+  connect: (transport: StdioServerTransport) => Promise<void>;
+};
 
 server.registerTool(
   'retrieve_knowledge',
@@ -895,7 +1060,9 @@ server.registerTool(
     })
   },
   async ({ task, agents: agentIds }) => {
-    const selectedAgents = agentIds.map((id) => Object.values(agents).find((a) => a.id === id)).filter(Boolean);
+    const selectedAgents = (agentIds as string[])
+      .map((id: string) => Object.values(agents).find((agent) => agent.id === id))
+      .filter((agent): agent is AgentInfo => Boolean(agent));
 
     if (selectedAgents.length === 0) {
       throw createAppError('AGENTS_NOT_FOUND', '没有找到有效的 Agent', '请选择有效的 Agent ID。', 404);
@@ -923,8 +1090,8 @@ server.registerTool(
 );
 
 // 辅助函数：根据 Agent ID 和任务获取角色
-function getAgentRole(agentId, _task) {
-  const roleMap = {
+function getAgentRole(agentId: string, _task: string): string {
+  const roleMap: Record<string, string> = {
     'literature-agent': '文献收集和分析',
     'writing-agent': '内容撰写和优化',
     'formula-agent': '公式推导和验证'
@@ -948,24 +1115,25 @@ server.registerTool(
   async ({ query, source = 'all', limit = 5, sinceYear, untilYear }) => {
     try {
       const expandedLimit = Math.min(50, Math.max(limit * 4, limit));
-      const warnings = [];
+      const warnings: LiteratureWarning[] = [];
 
-      async function safeFetch(name, runner) {
+      async function safeFetch(name: string, runner: () => Promise<PaperInput[]>) {
         try {
           const rows = await runner();
           return { name, rows, ok: true };
         } catch (error) {
+          const payload = toAppError(error, `${name} 检索失败`);
           warnings.push({
             source: name,
-            code: error?.code || 'UPSTREAM_ERROR',
-            message: error?.message || `${name} 检索失败`,
-            details: error?.details || ''
+            code: payload.code || 'UPSTREAM_ERROR',
+            message: payload.message || `${name} 检索失败`,
+            details: payload.details || ''
           });
           return { name, rows: [], ok: false };
         }
       }
 
-      const tasks = [];
+      const tasks: Array<Promise<{ name: string; rows: PaperInput[]; ok: boolean }>> = [];
       if (source === 'all') {
         tasks.push(safeFetch('openalex', () => searchOpenAlex(query, expandedLimit)));
         tasks.push(safeFetch('arxiv', () => searchArxiv(query, expandedLimit)));
@@ -1063,10 +1231,10 @@ server.registerTool(
       return toTextContent({
         id: paper.paperId,
         source: paper.source,
-        title: paper.title,
+        title: paper.title || 'Untitled',
         year: paper.year,
         venue: paper.venue,
-        keyFindings: draftFindingsFromAbstract(paper.abstract),
+        keyFindings: draftFindingsFromAbstract(paper.abstract || ''),
         citations: {
           citedBy: paper.citationCount,
           references: paper.referenceCount
@@ -1108,7 +1276,7 @@ server.registerTool(
       return toTextContent({
         id: paper.paperId,
         source: paper.source,
-        title: paper.title,
+        title: paper.title || 'Untitled',
         summary,
         keyPoints: draftFindingsFromAbstract(abstract)
       });
@@ -1155,7 +1323,7 @@ server.registerTool(
       state.literature.paperSchemas[paperId] = {
         paperId,
         source: paper.source,
-        title: paper.title,
+        title: paper.title || 'Untitled',
         schema,
         updatedAt: Date.now()
       };
@@ -1480,7 +1648,7 @@ server.registerTool(
   },
   async ({ citations, style = 'APA' }) => {
     // 模拟引用格式处理
-    const formattedCitations = citations.map((citation, index) => ({
+    const formattedCitations = (citations as CitationInput[]).map((citation: CitationInput, index: number) => ({
       id: index + 1,
       original: citation,
       formatted:
@@ -1879,7 +2047,7 @@ server.registerTool(
   },
   async ({ subtasks }) => {
     // 模拟 Agent 分配
-    const assignments = subtasks.map((subtask) => ({
+    const assignments = (subtasks as CollaborationSubtask[]).map((subtask: CollaborationSubtask) => ({
       ...subtask,
       assigned: true,
       estimatedTime: '2-4 小时',
