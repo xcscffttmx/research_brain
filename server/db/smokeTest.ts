@@ -19,7 +19,7 @@ import * as queryCacheRepo from '../repositories/queryCacheRepo.js';
 let passed = 0;
 let failed = 0;
 
-function check(label, condition, extra = '') {
+function check(label: string, condition: boolean, extra = ''): void {
   if (condition) {
     passed++;
     console.log(`  ✅ ${label}`);
@@ -29,47 +29,63 @@ function check(label, condition, extra = '') {
   }
 }
 
+function must<T>(value: T | null | undefined, label: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(`${label} 创建失败`);
+  }
+  return value;
+}
+
 /** 造一个指定"方向"的单位向量，便于验证 cosine 检索顺序 */
-function makeEmbedding(seedIndex) {
+function makeEmbedding(seedIndex: number): number[] {
   const vec = new Array(EMBEDDING_DIM).fill(0);
   vec[seedIndex % EMBEDDING_DIM] = 1;
   return vec;
 }
 
-function main() {
+function main(): void {
   console.log('迁移数据库…');
   migrate({ verbose: false });
 
   console.log('\n[1] 会话与消息');
-  const session = sessionRepo.createSession('测试会话');
+  const session = must(sessionRepo.createSession('测试会话'), 'session');
   check('创建会话', !!session?.id);
 
-  const m1 = messageRepo.appendMessage({
-    sessionId: session.id,
-    role: 'user',
-    content: 'Transformer 在遥感图像分割上的最新进展？',
-    tokenCount: 18
-  });
-  const m2 = messageRepo.appendMessage({
-    sessionId: session.id,
-    role: 'assistant',
-    content: '正在检索…',
-    tokenCount: 5,
-    status: 'streaming'
-  });
+  const m1 = must(
+    messageRepo.appendMessage({
+      sessionId: session.id,
+      role: 'user',
+      content: 'Transformer 在遥感图像分割上的最新进展？',
+      tokenCount: 18
+    }),
+    'message m1'
+  );
+  const m2 = must(
+    messageRepo.appendMessage({
+      sessionId: session.id,
+      role: 'assistant',
+      content: '正在检索…',
+      tokenCount: 5,
+      status: 'streaming'
+    }),
+    'message m2'
+  );
   check('追加两条消息且 seq 递增', m1.seq === 1 && m2.seq === 2, `got ${m1.seq}, ${m2.seq}`);
 
   messageRepo.updateMessage(m2.id, { content: '已找到 3 篇相关文献。', tokenCount: 12, status: 'done' });
-  check('回填流式消息', messageRepo.getMessage(m2.id).status === 'done');
+  check('回填流式消息', messageRepo.getMessage(m2.id)?.status === 'done');
 
   const stats = messageRepo.getSessionStats(session.id);
   check('统计 token 总数', stats.messageCount === 2 && stats.totalTokens === 30, JSON.stringify(stats));
 
   sessionRepo.updateSessionSummary(session.id, '用户关注遥感分割方向。', 1);
-  check('写入 Long-Term 摘要', sessionRepo.getSession(session.id).summary_upto === 1);
+  check('写入 Long-Term 摘要', sessionRepo.getSession(session.id)?.summary_upto === 1);
 
   console.log('\n[2] 知识库与向量检索');
-  const doc = chunkRepo.createDocument({ name: 'survey.md', mimeType: 'text/markdown', charCount: 500 });
+  const doc = must(
+    chunkRepo.createDocument({ name: 'survey.md', mimeType: 'text/markdown', charCount: 500 }),
+    'document'
+  );
   check('创建文档', !!doc?.id);
 
   const chunkIds = chunkRepo.insertChunksWithVectors(doc.id, [
@@ -95,14 +111,15 @@ function main() {
   check('携带文档名', hits[0].documentName === 'survey.md');
 
   console.log('\n[3] Agent Runtime 记录');
-  const run = agentRunRepo.startRun({ sessionId: session.id, messageId: m2.id });
+  const run = must(agentRunRepo.startRun({ sessionId: session.id, messageId: m2.id }), 'agent run');
   check('开启 run', run?.status === 'running');
 
   agentRunRepo.updateRunPlan(run.id, [
     { step: 1, tool: 'search_literature', reason: '需要在线文献' },
     { step: 2, tool: 'search_knowledge', reason: '结合个人知识库' }
   ]);
-  check('回填 Planner 计划', agentRunRepo.getRun(run.id).plan.length === 2);
+  const savedPlan = agentRunRepo.getRun(run.id)?.plan;
+  check('回填 Planner 计划', Array.isArray(savedPlan) && savedPlan.length === 2);
 
   const tc1 = agentRunRepo.startToolCall({
     runId: run.id,
@@ -151,8 +168,8 @@ function main() {
   check('引用序号有序', cited[0].citation_index === 1 && cited[1].citation_index === 2);
 
   agentRunRepo.finishRun(run.id, 'succeeded');
-  check('结束 run', agentRunRepo.getRun(run.id).status === 'succeeded');
-  check('记录耗时', agentRunRepo.getRun(run.id).ended_at > 0);
+  check('结束 run', agentRunRepo.getRun(run.id)?.status === 'succeeded');
+  check('记录耗时', Number(agentRunRepo.getRun(run.id)?.ended_at || 0) > 0);
 
   console.log('\n[5] 文献缓存与 TTL');
   paperRepo.upsertPapers([
@@ -168,19 +185,20 @@ function main() {
   ]);
   const paper = paperRepo.findPaper('arxiv-2401.12345');
   check('缓存文献可读回', paper?.title === 'Remote Sensing Segmentation with ViT');
-  check('authors 反序列化为数组', Array.isArray(paper.authors) && paper.authors.length === 2);
+  check('authors 反序列化为数组', Array.isArray(paper?.authors) && paper.authors.length === 2);
 
   // upsert 幂等性
   paperRepo.upsertPapers([{ paperId: 'arxiv-2401.12345', source: 'arxiv', title: '更新后的标题', authors: ['Alice'] }]);
   check('upsert 覆盖而非重复插入', paperRepo.listPapers().length === 1);
-  check('upsert 更新了字段', paperRepo.findPaper('arxiv-2401.12345').title === '更新后的标题');
+  check('upsert 更新了字段', paperRepo.findPaper('arxiv-2401.12345')?.title === '更新后的标题');
 
   paperRepo.savePaperSchema('arxiv-2401.12345', { problem: '小样本分割难', method: 'ViT + 数据增强' });
-  check('保存 Paper Schema', paperRepo.getPaperSchema('arxiv-2401.12345').method === 'ViT + 数据增强');
+  const paperSchema = paperRepo.getPaperSchema('arxiv-2401.12345') as { method?: string } | null;
+  check('保存 Paper Schema', paperSchema?.method === 'ViT + 数据增强');
 
   const key = queryCacheRepo.buildCacheKey({ query: 'remote sensing', source: 'all', sinceYear: 2026 });
   queryCacheRepo.setCached(key, { papers: [1, 2, 3] });
-  check('缓存命中', queryCacheRepo.getCached(key)?.papers.length === 3);
+  check('缓存命中', queryCacheRepo.getCached<{ papers: unknown[] }>(key)?.papers.length === 3);
   check(
     '相同参数产生相同 key',
     queryCacheRepo.buildCacheKey({ sinceYear: 2026, source: 'all', query: 'remote sensing' }) === key

@@ -17,7 +17,8 @@ export interface Paper {
   cachedAt: number;
 }
 
-export type PaperInput = Omit<Paper, 'cachedAt'> & { cachedAt?: number };
+export type PaperInput = Pick<Paper, 'paperId' | 'source'> &
+  Partial<Omit<Paper, 'paperId' | 'source' | 'cachedAt'>> & { cachedAt?: number };
 
 export interface PaperSchemaRecord {
   paperId: string;

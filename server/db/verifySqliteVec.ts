@@ -16,7 +16,7 @@ import * as sqliteVec from 'sqlite-vec';
 const DIM = 4;
 
 /** better-sqlite3 需要 Buffer 而非 Float32Array */
-export function toVectorBlob(values) {
+export function toVectorBlob(values: number[]): Buffer {
   return Buffer.from(new Float32Array(values).buffer);
 }
 
@@ -24,7 +24,7 @@ function main() {
   const db = new Database(':memory:');
   sqliteVec.load(db);
 
-  const { version } = db.prepare('select vec_version() as version').get();
+  const { version } = db.prepare('select vec_version() as version').get() as { version: string };
   console.log(`[1/4] sqlite-vec 加载成功，版本 ${version}`);
 
   // 关键：显式声明 cosine 距离
@@ -49,7 +49,7 @@ function main() {
        order by distance
        limit 3`
     )
-    .all(toVectorBlob([1, 0, 0, 0]));
+    .all(toVectorBlob([1, 0, 0, 0])) as Array<{ rowid: number; distance: number }>;
 
   console.log('[4/4] cosine 距离检索结果：');
   for (const row of rows) {

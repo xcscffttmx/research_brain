@@ -1,6 +1,7 @@
 import { createAppError } from '../errors.js';
 import { fetchWithTimeout } from '../fetchWithRetry.js';
 import { uid, pickText, pickAllTexts } from '../utils.js';
+import type { PaperInput } from '../../repositories/paperRepo.js';
 
 /** arXiv 标准 API 入口与超时配置 */
 const ARXIV_API_URL = 'https://export.arxiv.org/api/query';
@@ -10,8 +11,8 @@ const ARXIV_TIMEOUT_MS = 8000;
  * 解析 arXiv Atom Feed。
  * 采用轻量正则实现，无外部 XML 依赖，兼顾体积和可读性。
  */
-export function parseArxivFeed(xml) {
-  const entries = [];
+export function parseArxivFeed(xml: string): PaperInput[] {
+  const entries: PaperInput[] = [];
   const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi;
   let match = entryRegex.exec(xml);
 
@@ -50,7 +51,7 @@ export function parseArxivFeed(xml) {
 /**
  * 检索 arXiv，按相关性降序返回统一 Paper 结构。
  */
-export async function searchArxiv(query, limit = 5) {
+export async function searchArxiv(query: string, limit = 5): Promise<PaperInput[]> {
   const endpoint = new URL(ARXIV_API_URL);
   endpoint.searchParams.set('search_query', `all:${query}`);
   endpoint.searchParams.set('start', '0');
