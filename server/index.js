@@ -26,12 +26,35 @@ dotenv.config({ path: rootEnvPath, override: true });
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true });
 dotenv.config({ override: false });
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+const uploadMaxFileSizeMb = Number(process.env.UPLOAD_MAX_FILE_SIZE_MB || 20);
+const uploadMaxFiles = Number(process.env.UPLOAD_MAX_FILES || 8);
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: uploadMaxFileSizeMb * 1024 * 1024,
+    files: uploadMaxFiles
+  }
+});
 
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      callback(null, allowedOrigins.includes(origin));
+    }
+  })
+);
 app.use(express.json({ limit: '4mb' }));
 
 const serverPort = Number(process.env.SERVER_PORT || 8787);
+const serverHost = process.env.SERVER_HOST || '127.0.0.1';
 
 function getErrorPayload(error, fallbackMessage) {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -581,11 +604,30 @@ app.post('/api/chat/abort', (req, res) => {
   res.json({ ok: aborted, aborted, activeRuns: getActiveRunCount() });
 });
 
+app.use((error, _req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    const message =
+      error.code === 'LIMIT_FILE_SIZE'
+        ? `单个文件不能超过 ${uploadMaxFileSizeMb}MB`
+        : error.code === 'LIMIT_FILE_COUNT'
+          ? `一次最多上传 ${uploadMaxFiles} 个文件`
+          : '上传请求不符合限制';
+    res.status(413).json({
+      error: message,
+      code: error.code,
+      details: error.message
+    });
+    return;
+  }
+
+  next(error);
+});
+
 app.use(express.static(path.resolve(__dirname, '../dist')));
 app.get('*', (_, res) => {
   res.sendFile(path.resolve(__dirname, '../dist/index.html'));
 });
 
-app.listen(serverPort, '127.0.0.1', () => {
-  console.log(`Server running at http://127.0.0.1:${serverPort}`);
+app.listen(serverPort, serverHost, () => {
+  console.log(`Server running at http://${serverHost}:${serverPort}`);
 });

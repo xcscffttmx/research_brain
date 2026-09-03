@@ -9,6 +9,7 @@ dist
 
 # build/test artifacts
 coverage
+.server-build
 *.log
 .turbo
 .vercel

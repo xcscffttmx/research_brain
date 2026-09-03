@@ -11,7 +11,14 @@ import prettier from 'eslint-config-prettier';
  */
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'bench/**', 'src/types/auto-imports.d.ts', 'src/types/components.d.ts']
+    ignores: [
+      'dist/**',
+      '.server-build/**',
+      'node_modules/**',
+      'bench/**',
+      'src/types/auto-imports.d.ts',
+      'src/types/components.d.ts'
+    ]
   },
 
   js.configs.recommended,
