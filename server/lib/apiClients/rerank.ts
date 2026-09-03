@@ -1,4 +1,4 @@
-import { createAppError } from '../errors.js';
+import { createAppError, errorCode, isAbortError } from '../errors.js';
 import { qwenConfig } from '../config.js';
 import { fetchWithRetry } from '../fetchWithRetry.js';
 
@@ -16,17 +16,35 @@ const MAX_DOCUMENTS = 100;
 /** 单条候选文本上限，过长会拖慢精排且收益递减 */
 const MAX_DOCUMENT_CHARS = 2_000;
 
-/**
- * 对候选文档做精排。
- *
- * @param {string} query
- * @param {string[]} documents
- * @param {object} [options]
- * @param {number} [options.topN] 返回条数，默认全部
- * @param {AbortSignal} [options.signal]
- * @returns {Promise<Array<{index: number, score: number}>>} 按分数降序，index 指向入参 documents 下标
- */
-export async function rerankDocuments(query, documents, { topN, signal } = {}) {
+export interface RerankItem {
+  /** 指向入参 documents 的下标 */
+  index: number;
+  score: number;
+}
+
+export interface RerankOptions {
+  /** 返回条数，默认全部 */
+  topN?: number;
+  signal?: AbortSignal;
+}
+
+export interface RerankOutcome {
+  items: RerankItem[];
+  degraded: boolean;
+  reason?: string;
+}
+
+interface RerankResponsePayload {
+  output?: { results?: unknown };
+  results?: unknown;
+}
+
+/** 对候选文档做精排，返回按分数降序的下标列表 */
+export async function rerankDocuments(
+  query: string,
+  documents: string[],
+  { topN, signal }: RerankOptions = {}
+): Promise<RerankItem[]> {
   if (!qwenConfig.apiKey) {
     throw createAppError(
       'MISSING_API_KEY',
@@ -65,7 +83,7 @@ export async function rerankDocuments(query, documents, { topN, signal } = {}) {
     throw createAppError('RERANK_HTTP_ERROR', `Reranker 请求失败（${response.status}）`, text, 502);
   }
 
-  const payload = await response.json();
+  const payload = (await response.json()) as RerankResponsePayload | null;
   // 原生接口返回 output.results；兼容模式（若账号已开放）返回 results
   const results = payload?.output?.results ?? payload?.results;
   if (!Array.isArray(results)) {
@@ -73,7 +91,12 @@ export async function rerankDocuments(query, documents, { topN, signal } = {}) {
   }
 
   return results
-    .filter((item) => Number.isInteger(item?.index) && item.index < candidates.length)
+    .filter(
+      (item): item is { index: number; relevance_score?: number } =>
+        Boolean(item) &&
+        Number.isInteger((item as { index?: unknown }).index) &&
+        (item as { index: number }).index < candidates.length
+    )
     .map((item) => ({ index: item.index, score: Number(item.relevance_score ?? 0) }))
     .sort((a, b) => b.score - a.score);
 }
@@ -81,10 +104,12 @@ export async function rerankDocuments(query, documents, { topN, signal } = {}) {
 /**
  * 精排的降级包装：上游不可用时保持向量召回的原有顺序，
  * 让检索链路「变差但不中断」。
- *
- * @returns {Promise<{items: Array<{index: number, score: number}>, degraded: boolean, reason?: string}>}
  */
-export async function rerankOrFallback(query, documents, options = {}) {
+export async function rerankOrFallback(
+  query: string,
+  documents: string[],
+  options: RerankOptions = {}
+): Promise<RerankOutcome> {
   try {
     const items = await rerankDocuments(query, documents, options);
     if (!items.length) {
@@ -93,16 +118,16 @@ export async function rerankOrFallback(query, documents, options = {}) {
     return { items, degraded: false };
   } catch (error) {
     // 取消要向上传播，不能被降级逻辑吞掉
-    if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;
+    if (isAbortError(error) || errorCode(error) === 'CANCELLED') throw error;
     return {
       items: keepOriginalOrder(documents, options.topN),
       degraded: true,
-      reason: error?.code || 'RERANK_FAILED'
+      reason: errorCode(error) || 'RERANK_FAILED'
     };
   }
 }
 
 /** 降级时的顺序：沿用向量距离顺序，分数置 0 表示「未精排」 */
-function keepOriginalOrder(documents, topN) {
+function keepOriginalOrder(documents: string[], topN?: number): RerankItem[] {
   return documents.slice(0, topN ?? documents.length).map((_, index) => ({ index, score: 0 }));
 }

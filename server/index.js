@@ -64,9 +64,15 @@ async function createMcpSession() {
       version: '1.0.0'
     });
 
+    // 父进程若由 tsx 启动，子进程必须继承同样的 loader，否则解析不到 .ts 模块
+    const loaderArgs = process.execArgv.filter((arg, index, args) => {
+      if (arg === '--require' || arg === '--import') return args[index + 1]?.includes('tsx');
+      return arg.includes('tsx');
+    });
+
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [path.resolve(__dirname, './mcp-server.js')],
+      args: [...loaderArgs, path.resolve(__dirname, './mcp-server.js')],
       cwd: path.resolve(__dirname, '..'),
       env: {
         ...process.env,

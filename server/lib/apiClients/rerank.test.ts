@@ -3,16 +3,23 @@ import { rerankDocuments, rerankOrFallback } from './rerank.js';
 
 const DOCS = ['文档 A', '文档 B', '文档 C'];
 
-function mockResponse(body, ok = true, status = 200) {
+/** 只实现被测代码用到的字段，断言时再收窄为 Response */
+function mockResponse(body: unknown, ok = true, status = 200): Response {
   return {
     ok,
     status,
     json: async () => body,
     text: async () => JSON.stringify(body)
-  };
+  } as unknown as Response;
 }
 
-let originalFetch;
+/** 取第 N 次 fetch 调用的请求体 */
+function requestBody(fetchMock: ReturnType<typeof vi.fn>, callIndex = 0) {
+  const init = fetchMock.mock.calls[callIndex]?.[1] as RequestInit | undefined;
+  return JSON.parse(String(init?.body ?? '{}'));
+}
+
+let originalFetch: typeof globalThis.fetch;
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
@@ -50,7 +57,7 @@ describe('rerankDocuments', () => {
 
     await rerankDocuments('什么是重排序', DOCS, { topN: 2 }).catch(() => undefined);
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = requestBody(fetchMock);
     expect(body.input.query).toBe('什么是重排序');
     expect(body.input.documents).toEqual(DOCS);
     expect(body.parameters).toEqual({ return_documents: false, top_n: 2 });
@@ -89,7 +96,7 @@ describe('rerankDocuments', () => {
     globalThis.fetch = fetchMock;
 
     await rerankDocuments('q', ['x'.repeat(5000)]).catch(() => undefined);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = requestBody(fetchMock);
     expect(body.input.documents[0].length).toBe(2000);
   });
 

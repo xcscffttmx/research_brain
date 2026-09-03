@@ -1,11 +1,22 @@
-import { createAppError } from '../errors.js';
+import { createAppError, isAbortError } from '../errors.js';
 import { qwenConfig } from '../config.js';
+
+/** DashScope 单条 embedding 的经验安全上限 */
+const EMBEDDING_MAX_CHARS = 6_000;
+
+export interface QwenRequestOptions {
+  signal?: AbortSignal;
+}
 
 /**
  * Qwen 通用 POST 请求，返回原始 Response。
- * 保持与 mcp-server.js 原实现同样的错误分类和状态码。
+ * 错误分类与状态码保持与最初 mcp-server 实现一致。
  */
-async function postQwen(endpoint, body, { signal } = {}) {
+async function postQwen(
+  endpoint: string,
+  body: Record<string, unknown>,
+  { signal }: QwenRequestOptions = {}
+): Promise<Response> {
   if (!qwenConfig.apiKey) {
     throw createAppError(
       'MISSING_API_KEY',
@@ -15,7 +26,7 @@ async function postQwen(endpoint, body, { signal } = {}) {
     );
   }
 
-  let response;
+  let response: Response;
   try {
     response = await fetch(`${qwenConfig.baseUrl}${endpoint}`, {
       method: 'POST',
@@ -28,7 +39,7 @@ async function postQwen(endpoint, body, { signal } = {}) {
     });
   } catch (error) {
     // 取消要原样抛出，否则会被误判成网络故障并触发重试
-    if (error?.name === 'AbortError') throw error;
+    if (isAbortError(error)) throw error;
     throw createAppError(
       'NETWORK_UNREACHABLE',
       '无法连接到 Qwen 服务',
@@ -64,13 +75,21 @@ async function postQwen(endpoint, body, { signal } = {}) {
 }
 
 /** 非流式调用，直接返回 JSON */
-export async function qwenFetch(endpoint, body, options) {
+export async function qwenFetch<T = any>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  options?: QwenRequestOptions
+): Promise<T> {
   const response = await postQwen(endpoint, body, options);
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
 /** 流式调用，返回原始 Response，由调用方消费 SSE */
-export async function qwenStream(endpoint, body, signal) {
+export async function qwenStream(
+  endpoint: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<Response> {
   const response = await postQwen(endpoint, { ...body, stream: true }, { signal });
   if (!response.body) {
     throw createAppError('QWEN_STREAM_EMPTY', 'Qwen 流式响应为空', '上游未返回可读流。', 502);
@@ -78,14 +97,11 @@ export async function qwenStream(endpoint, body, signal) {
   return response;
 }
 
-/**
- * 基于 Qwen embedding 模型生成向量。
- * 上限 6000 字符是 DashScope 单条 embedding 的经验安全值。
- */
-export async function createEmbedding(text) {
-  const result = await qwenFetch('/embeddings', {
+/** 基于 Qwen embedding 模型生成向量 */
+export async function createEmbedding(text: string): Promise<number[]> {
+  const result = await qwenFetch<{ data?: Array<{ embedding?: number[] }> }>('/embeddings', {
     model: qwenConfig.embeddingModel,
-    input: text.slice(0, 6000)
+    input: text.slice(0, EMBEDDING_MAX_CHARS)
   });
 
   const vector = result.data?.[0]?.embedding;

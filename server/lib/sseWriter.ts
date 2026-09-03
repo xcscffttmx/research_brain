@@ -1,3 +1,5 @@
+import type { ServerResponse } from 'node:http';
+
 /**
  * SSE 帧写入器 —— 规范化服务端推流格式。
  *
@@ -20,7 +22,26 @@
 /** 心跳间隔：需小于前端 Gate 的 stallTimeout，否则会被误判为中断 */
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
-export function createSseWriter(res, { heartbeatMs = HEARTBEAT_INTERVAL_MS } = {}) {
+export type SsePayload = Record<string, unknown>;
+
+export interface SseWriter {
+  delta: (text: string) => boolean;
+  toolCall: (payload: SsePayload) => boolean;
+  toolResult: (payload: SsePayload) => boolean;
+  status: (stage: string, detail?: SsePayload) => boolean;
+  usage: (payload: SsePayload) => boolean;
+  error: (payload: SsePayload) => boolean;
+  done: (payload?: SsePayload) => void;
+  send: (event: string, payload?: SsePayload) => boolean;
+  close: () => void;
+  readonly seq: number;
+  readonly closed: boolean;
+}
+
+export function createSseWriter(
+  res: ServerResponse,
+  { heartbeatMs = HEARTBEAT_INTERVAL_MS }: { heartbeatMs?: number } = {}
+): SseWriter {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -37,7 +58,7 @@ export function createSseWriter(res, { heartbeatMs = HEARTBEAT_INTERVAL_MS } = {
     send('ping', { t: Date.now() });
   }, heartbeatMs);
 
-  function send(event, payload) {
+  function send(event: string, payload?: SsePayload): boolean {
     if (closed) return false;
     seq += 1;
     // JSON.stringify 已转义换行，保证 data 恒为单行
@@ -52,7 +73,7 @@ export function createSseWriter(res, { heartbeatMs = HEARTBEAT_INTERVAL_MS } = {
     }
   }
 
-  function close() {
+  function close(): void {
     if (closed) return;
     closed = true;
     clearInterval(heartbeat);
@@ -67,24 +88,17 @@ export function createSseWriter(res, { heartbeatMs = HEARTBEAT_INTERVAL_MS } = {
   res.on?.('close', close);
 
   return {
-    /** 增量文本 */
     delta: (text) => send('delta', { text }),
-    /** 工具开始调用 */
     toolCall: (payload) => send('tool_call', payload),
-    /** 工具返回 */
     toolResult: (payload) => send('tool_result', payload),
-    /** 状态变更 */
     status: (stage, detail = {}) => send('status', { stage, ...detail }),
-    /** token 用量 */
     usage: (payload) => send('usage', payload),
     /** 错误（发送后不自动 close，由调用方决定是否继续） */
     error: (payload) => send('error', payload),
-    /** 结束并关闭连接 */
     done: (payload = {}) => {
       send('done', payload);
       close();
     },
-    /** 通用发送（自定义事件） */
     send,
     close,
     get seq() {

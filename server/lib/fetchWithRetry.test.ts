@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fetchWithTimeout, fetchWithRetry } from './fetchWithRetry.js';
 
-let originalFetch;
+let originalFetch: typeof globalThis.fetch;
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
@@ -12,12 +12,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** 只实现被测代码用到的字段，赋给 globalThis.fetch 前收窄为 Response */
+function statusResponse(ok: boolean, status: number): Response {
+  return { ok, status } as unknown as Response;
+}
+
 /** 模拟一个永不返回、只响应 abort 的请求 */
 function hangingFetch() {
   return vi.fn(
-    (_url, options) =>
-      new Promise((_, reject) => {
-        options.signal.addEventListener(
+    (_url: string | URL | Request, options?: RequestInit) =>
+      new Promise<Response>((_, reject) => {
+        options?.signal?.addEventListener(
           'abort',
           () => {
             const error = new Error('aborted');
@@ -49,7 +54,7 @@ describe('fetchWithTimeout', () => {
   });
 
   it('正常响应直接返回', async () => {
-    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200 }));
+    globalThis.fetch = vi.fn(async () => statusResponse(true, 200));
     const response = await fetchWithTimeout('https://example.com');
     expect(response.status).toBe(200);
   });
@@ -57,7 +62,7 @@ describe('fetchWithTimeout', () => {
 
 describe('fetchWithRetry', () => {
   it('5xx 会重试并最终返回最后一次响应', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: false, status: 500 }));
+    const fetchMock = vi.fn(async () => statusResponse(false, 500));
     globalThis.fetch = fetchMock;
 
     const response = await fetchWithRetry('https://example.com', {}, { retries: 2, baseDelayMs: 1 });
@@ -66,7 +71,7 @@ describe('fetchWithRetry', () => {
   });
 
   it('2xx 不重试', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }));
+    const fetchMock = vi.fn(async () => statusResponse(true, 200));
     globalThis.fetch = fetchMock;
 
     await fetchWithRetry('https://example.com', {}, { retries: 2, baseDelayMs: 1 });

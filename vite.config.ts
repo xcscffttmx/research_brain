@@ -27,10 +27,10 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'server/**/*.test.js'],
+    include: ['src/**/*.test.ts', 'server/**/*.test.ts', 'server/**/*.test.js'],
     coverage: {
       provider: 'v8',
-      include: ['src/services/**', 'src/composables/**', 'server/lib/**', 'server/services/**'],
+      include: ['src/services/**', 'src/composables/**', 'src/stores/**', 'server/lib/**', 'server/services/**'],
       reporter: ['text', 'html']
     }
   }

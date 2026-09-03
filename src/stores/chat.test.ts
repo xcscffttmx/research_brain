@@ -16,7 +16,9 @@ async function loadStore() {
     clear: () => store.clear()
   });
   vi.stubGlobal('window', { localStorage });
-  vi.stubGlobal('crypto', { randomUUID: () => `uuid-${store.size}-${Math.trunc(performance.now())}` });
+  // 必须严格自增：createNewSession 会按 id 去重，撞 id 会把上一个会话挤掉
+  let seq = 0;
+  vi.stubGlobal('crypto', { randomUUID: () => `uuid-${++seq}` });
 
   vi.resetModules();
   const { useChatStore } = await import('./chat');
