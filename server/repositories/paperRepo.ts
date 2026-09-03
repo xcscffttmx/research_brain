@@ -1,7 +1,32 @@
 import { getDb } from '../db/client.js';
+import type { PaperRow } from '../db/types.js';
 
-/** 批量 upsert 文献缓存（多源检索结果落库，替代原来的内存 state.literature.papers） */
-export function upsertPapers(papers) {
+/** 对外的驼峰视图，字段与前端 LiteraturePaper 对齐 */
+export interface Paper {
+  paperId: string;
+  source: string;
+  title: string;
+  abstract: string;
+  authors: string[];
+  year: number | null;
+  venue: string;
+  url: string;
+  pdfUrl: string;
+  citationCount: number | null;
+  referenceCount: number | null;
+  cachedAt: number;
+}
+
+export type PaperInput = Omit<Paper, 'cachedAt'> & { cachedAt?: number };
+
+export interface PaperSchemaRecord {
+  paperId: string;
+  schema: unknown;
+  createdAt: number;
+}
+
+/** 批量 upsert 文献缓存（多源检索结果落库） */
+export function upsertPapers(papers: PaperInput[]): number {
   const db = getDb();
   const now = Date.now();
   const stmt = db.prepare(
@@ -45,19 +70,23 @@ export function upsertPapers(papers) {
 }
 
 /** 按 paperId 查（不限来源，取最近缓存的一条） */
-export function findPaper(paperId) {
-  const row = getDb().prepare('select * from papers where paper_id = ? order by cached_at desc limit 1').get(paperId);
+export function findPaper(paperId: string): Paper | null {
+  const row = getDb()
+    .prepare('select * from papers where paper_id = ? order by cached_at desc limit 1')
+    .get(paperId) as PaperRow | undefined;
   return row ? toPaper(row) : null;
 }
 
 /** 列出缓存的文献 */
-export function listPapers(limit = 100) {
-  return getDb().prepare('select * from papers order by cached_at desc limit ?').all(limit).map(toPaper);
+export function listPapers(limit = 100): Paper[] {
+  return (getDb().prepare('select * from papers order by cached_at desc limit ?').all(limit) as PaperRow[]).map(
+    toPaper
+  );
 }
 
 // ---------- paper_schemas ----------
 
-export function savePaperSchema(paperId, schema) {
+export function savePaperSchema(paperId: string, schema: unknown): void {
   getDb()
     .prepare(
       `insert into paper_schemas(paper_id, schema_json, created_at) values (?, ?, ?)
@@ -66,34 +95,40 @@ export function savePaperSchema(paperId, schema) {
     .run(paperId, JSON.stringify(schema), Date.now());
 }
 
-export function getPaperSchema(paperId) {
-  const row = getDb().prepare('select * from paper_schemas where paper_id = ?').get(paperId);
+export function getPaperSchema<T = unknown>(paperId: string): T | null {
+  const row = getDb().prepare('select * from paper_schemas where paper_id = ?').get(paperId) as
+    | { schema_json: string }
+    | undefined;
   if (!row) return null;
   try {
-    return JSON.parse(row.schema_json);
+    return JSON.parse(row.schema_json) as T;
   } catch {
     return null;
   }
 }
 
-export function listPaperSchemas() {
-  return getDb()
-    .prepare('select * from paper_schemas order by created_at desc')
-    .all()
-    .map((row) => {
+export function listPaperSchemas(): PaperSchemaRecord[] {
+  const rows = getDb().prepare('select * from paper_schemas order by created_at desc').all() as Array<{
+    paper_id: string;
+    schema_json: string;
+    created_at: number;
+  }>;
+
+  return rows
+    .map((row): PaperSchemaRecord | null => {
       try {
         return { paperId: row.paper_id, schema: JSON.parse(row.schema_json), createdAt: row.created_at };
       } catch {
         return null;
       }
     })
-    .filter(Boolean);
+    .filter((item): item is PaperSchemaRecord => item !== null);
 }
 
-function toPaper(row) {
-  let authors = [];
+function toPaper(row: PaperRow): Paper {
+  let authors: string[] = [];
   try {
-    authors = JSON.parse(row.authors);
+    authors = JSON.parse(row.authors) as string[];
   } catch {
     authors = [];
   }

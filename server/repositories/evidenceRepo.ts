@@ -1,15 +1,25 @@
 import { getDb } from '../db/client.js';
 import { uid } from '../lib/utils.js';
+import type { EvidenceRow } from '../db/types.js';
+
+export interface EvidenceInput {
+  chunkId?: string;
+  paperId?: string;
+  snippet: string;
+  vectorScore?: number;
+  rerankScore?: number;
+}
+
+export interface CitationMark {
+  evidenceId: string;
+  citationIndex: number;
+}
 
 /**
  * 批量写入某一轮检索召回的证据。
- * 每条证据记录向量分与 rerank 分，供面试时展示"召回 -> 精排"的完整链路。
- *
- * @param {string} runId
- * @param {number} hop 第几轮检索（多步检索时递增）
- * @param {Array<{chunkId?: string, paperId?: string, snippet: string, vectorScore?: number, rerankScore?: number}>} items
+ * 每条证据记录向量分与 rerank 分，完整保留「召回 -> 精排」链路。
  */
-export function recordEvidence(runId, hop, items) {
+export function recordEvidence(runId: string, hop: number, items: EvidenceInput[]): string[] {
   const db = getDb();
   const now = Date.now();
   const stmt = db.prepare(
@@ -18,7 +28,7 @@ export function recordEvidence(runId, hop, items) {
   );
 
   const run = db.transaction(() => {
-    const ids = [];
+    const ids: string[] = [];
     for (const item of items) {
       const id = uid('ev');
       stmt.run(
@@ -40,11 +50,8 @@ export function recordEvidence(runId, hop, items) {
   return run();
 }
 
-/**
- * 标记哪些证据最终被答案引用，并写入引用序号。
- * @param {Array<{evidenceId: string, citationIndex: number}>} citations
- */
-export function markCited(citations) {
+/** 标记哪些证据最终被答案引用，并写入引用序号 */
+export function markCited(citations: CitationMark[]): void {
   const db = getDb();
   const stmt = db.prepare('update evidence set cited = 1, citation_index = ? where id = ?');
   const run = db.transaction(() => {
@@ -54,19 +61,19 @@ export function markCited(citations) {
 }
 
 /** 列出某 run 的全部证据，按轮次与 rerank 分排序 */
-export function listEvidence(runId) {
+export function listEvidence(runId: string): EvidenceRow[] {
   return getDb()
     .prepare(
       `select * from evidence
        where run_id = ?
        order by retrieval_hop asc, coalesce(rerank_score, vector_score, 0) desc`
     )
-    .all(runId);
+    .all(runId) as EvidenceRow[];
 }
 
 /** 只取被引用的证据（前端渲染引用列表用） */
-export function listCitedEvidence(runId) {
+export function listCitedEvidence(runId: string): EvidenceRow[] {
   return getDb()
     .prepare('select * from evidence where run_id = ? and cited = 1 order by citation_index asc')
-    .all(runId);
+    .all(runId) as EvidenceRow[];
 }

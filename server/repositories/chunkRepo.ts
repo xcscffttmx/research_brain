@@ -1,8 +1,49 @@
 import { getDb, toVectorBlob } from '../db/client.js';
 import { uid } from '../lib/utils.js';
+import type { ChunkRow, DocumentRow } from '../db/types.js';
+
+export interface DocumentWithChunkCount extends DocumentRow {
+  chunkCount: number;
+}
+
+export interface CreateDocumentInput {
+  name: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  charCount?: number;
+  source?: string;
+  content?: string;
+}
+
+export interface ChunkInput {
+  text: string;
+  embedding: number[];
+  tokenCount?: number;
+  spanStart?: number;
+  spanEnd?: number;
+}
+
+export interface VectorSearchHit {
+  chunkId: string;
+  documentId: string;
+  documentName: string;
+  text: string;
+  spanStart: number;
+  spanEnd: number;
+  distance: number;
+  /** cosine distance 换算的相似度，便于阅读 */
+  score: number;
+}
 
 /** 新建文档记录 */
-export function createDocument({ name, mimeType = '', sizeBytes = 0, charCount = 0, source = 'upload', content = '' }) {
+export function createDocument({
+  name,
+  mimeType = '',
+  sizeBytes = 0,
+  charCount = 0,
+  source = 'upload',
+  content = ''
+}: CreateDocumentInput): DocumentRow | null {
   const db = getDb();
   const id = uid('doc');
   db.prepare(
@@ -12,36 +53,37 @@ export function createDocument({ name, mimeType = '', sizeBytes = 0, charCount =
   return getDocument(id);
 }
 
-export function getDocument(id) {
-  return getDb().prepare('select * from documents where id = ?').get(id) || null;
+export function getDocument(id: string): DocumentRow | null {
+  return (getDb().prepare('select * from documents where id = ?').get(id) as DocumentRow | undefined) || null;
 }
 
 /** 是否已存在同名文档（文献入库去重用） */
-export function findDocumentByName(name) {
-  return getDb().prepare('select * from documents where name = ?').get(name) || null;
+export function findDocumentByName(name: string): DocumentRow | null {
+  return (getDb().prepare('select * from documents where name = ?').get(name) as DocumentRow | undefined) || null;
 }
 
-export function listDocuments() {
+export function listDocuments(): DocumentWithChunkCount[] {
   return getDb()
     .prepare(
       `select d.*, (select count(*) from chunks c where c.document_id = d.id) as chunkCount
        from documents d order by d.created_at desc`
     )
-    .all();
+    .all() as DocumentWithChunkCount[];
 }
 
-export function deleteDocument(id) {
+export function deleteDocument(id: string): boolean {
   // chunks 与 chunk_vec_map 通过外键级联删除，但 vec0 虚拟表需手动清理
   const db = getDb();
   const run = db.transaction(() => {
-    const rowids = db
-      .prepare(
-        `select m.rowid as rowid from chunk_vec_map m
+    const rowids = (
+      db
+        .prepare(
+          `select m.rowid as rowid from chunk_vec_map m
          join chunks c on c.id = m.chunk_id
          where c.document_id = ?`
-      )
-      .all(id)
-      .map((r) => r.rowid);
+        )
+        .all(id) as Array<{ rowid: number }>
+    ).map((r) => r.rowid);
 
     const deleteVec = db.prepare('delete from chunk_vectors where rowid = ?');
     for (const rowid of rowids) deleteVec.run(BigInt(rowid));
@@ -51,7 +93,7 @@ export function deleteDocument(id) {
   return run();
 }
 
-export function clearAllDocuments() {
+export function clearAllDocuments(): number {
   const db = getDb();
   const run = db.transaction(() => {
     db.prepare('delete from chunk_vectors').run();
@@ -66,11 +108,8 @@ export function clearAllDocuments() {
 /**
  * 批量写入分块及其向量。
  * 单事务提交，保证 chunks / chunk_vec_map / chunk_vectors 三者一致。
- *
- * @param {string} documentId
- * @param {Array<{text: string, embedding: number[], tokenCount?: number, spanStart?: number, spanEnd?: number}>} items
  */
-export function insertChunksWithVectors(documentId, items) {
+export function insertChunksWithVectors(documentId: string, items: ChunkInput[]): string[] {
   const db = getDb();
   const now = Date.now();
 
@@ -82,7 +121,7 @@ export function insertChunksWithVectors(documentId, items) {
   const insertVec = db.prepare('insert into chunk_vectors(rowid, embedding) values (?, ?)');
 
   const run = db.transaction(() => {
-    const created = [];
+    const created: string[] = [];
     items.forEach((item, index) => {
       const chunkId = uid('chunk');
       insertChunk.run(
@@ -106,14 +145,8 @@ export function insertChunksWithVectors(documentId, items) {
   return run();
 }
 
-/**
- * 向量相似检索（cosine）。返回按距离升序（越相似越靠前）的分块及其原文信息。
- *
- * @param {number[]} queryEmbedding
- * @param {number} topK
- * @returns {Array<{chunkId, documentId, documentName, text, spanStart, spanEnd, distance, score}>}
- */
-export function searchChunksByVector(queryEmbedding, topK = 50) {
+/** 向量相似检索（cosine），按距离升序返回 */
+export function searchChunksByVector(queryEmbedding: number[], topK = 50): VectorSearchHit[] {
   const db = getDb();
   const rows = db
     .prepare(
@@ -123,7 +156,7 @@ export function searchChunksByVector(queryEmbedding, topK = 50) {
        order by v.distance
        limit ?`
     )
-    .all(toVectorBlob(queryEmbedding), topK);
+    .all(toVectorBlob(queryEmbedding), topK) as Array<{ rowid: number; distance: number }>;
 
   if (!rows.length) return [];
 
@@ -136,14 +169,13 @@ export function searchChunksByVector(queryEmbedding, topK = 50) {
      where m.rowid = ?`
   );
 
-  const results = [];
+  const results: VectorSearchHit[] = [];
   for (const row of rows) {
-    const detail = detailStmt.get(row.rowid);
+    const detail = detailStmt.get(row.rowid) as Omit<VectorSearchHit, 'distance' | 'score'> | undefined;
     if (!detail) continue; // 映射已被删除，跳过
     results.push({
       ...detail,
       distance: row.distance,
-      // cosine distance -> 相似度，便于阅读
       score: Number((1 - row.distance).toFixed(6))
     });
   }
@@ -151,10 +183,10 @@ export function searchChunksByVector(queryEmbedding, topK = 50) {
 }
 
 /** 统计分块总数（健康检查与 UI 展示用） */
-export function countChunks() {
-  return getDb().prepare('select count(*) as count from chunks').get().count;
+export function countChunks(): number {
+  return (getDb().prepare('select count(*) as count from chunks').get() as { count: number }).count;
 }
 
-export function getChunk(chunkId) {
-  return getDb().prepare('select * from chunks where id = ?').get(chunkId) || null;
+export function getChunk(chunkId: string): ChunkRow | null {
+  return (getDb().prepare('select * from chunks where id = ?').get(chunkId) as ChunkRow | undefined) || null;
 }

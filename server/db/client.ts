@@ -9,13 +9,25 @@ export const EMBEDDING_DIM = 1024;
 const DATA_DIR = path.resolve(process.cwd(), '.data');
 const DEFAULT_DB_PATH = path.join(DATA_DIR, 'research-agent.db');
 
-let db = null;
+export type Db = Database.Database;
+
+export interface DatabaseHealth {
+  enabled: boolean;
+  ok: boolean;
+  engine: 'sqlite';
+  sqliteVersion?: string;
+  sqliteVecVersion?: string;
+  tableCount?: number;
+  reason?: string;
+}
+
+let db: Db | null = null;
 
 /**
  * 获取 SQLite 单例连接（已加载 sqlite-vec 扩展）。
  * 通过 SQLITE_PATH 环境变量可覆盖路径，测试时可传 ':memory:'。
  */
-export function getDb() {
+export function getDb(): Db {
   if (db) return db;
 
   const dbPath = process.env.SQLITE_PATH || DEFAULT_DB_PATH;
@@ -31,7 +43,7 @@ export function getDb() {
 }
 
 /** 关闭连接（进程退出或测试清理时用） */
-export function closeDb() {
+export function closeDb(): void {
   if (db) {
     db.close();
     db = null;
@@ -42,22 +54,24 @@ export function closeDb() {
  * 把普通数组 / Float32Array 转成 better-sqlite3 可绑定的 Buffer。
  * 注意：vec0 的 rowid 必须绑定 BigInt，向量必须是 Buffer 或 JSON 字符串。
  */
-export function toVectorBlob(values) {
+export function toVectorBlob(values: number[] | Float32Array): Buffer {
   return Buffer.from(new Float32Array(values).buffer);
 }
 
 /** 从 Buffer 还原成普通数组（调试或导出时用） */
-export function fromVectorBlob(buffer) {
+export function fromVectorBlob(buffer: Buffer): number[] {
   return Array.from(new Float32Array(buffer.buffer, buffer.byteOffset, buffer.length / 4));
 }
 
 /** 健康检查：替代原来的 PostgreSQL 版本 */
-export function checkDatabaseHealth() {
+export function checkDatabaseHealth(): DatabaseHealth {
   try {
     const conn = getDb();
-    const { version } = conn.prepare('select sqlite_version() as version').get();
-    const { vecVersion } = conn.prepare('select vec_version() as vecVersion').get();
-    const { count } = conn.prepare('select count(*) as count from sqlite_master where type = ?').get('table');
+    const { version } = conn.prepare('select sqlite_version() as version').get() as { version: string };
+    const { vecVersion } = conn.prepare('select vec_version() as vecVersion').get() as { vecVersion: string };
+    const { count } = conn.prepare('select count(*) as count from sqlite_master where type = ?').get('table') as {
+      count: number;
+    };
     return {
       enabled: true,
       ok: true,
@@ -71,7 +85,7 @@ export function checkDatabaseHealth() {
       enabled: true,
       ok: false,
       engine: 'sqlite',
-      reason: error.message
+      reason: error instanceof Error ? error.message : String(error)
     };
   }
 }
