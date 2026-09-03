@@ -1,4 +1,5 @@
 import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import dotenv from 'dotenv';
@@ -13,6 +14,7 @@ import { createSseWriter } from './lib/sseWriter.js';
 import { runAgentTurn, abortRun, getActiveRunCount } from './agent/runtime.js';
 import { generateAnswerWithGroundedness, collectCitations } from './services/answerGenerator.js';
 import { runAgenticRag } from './services/agenticRag.js';
+import type { RagCitation } from './services/agenticRag.js';
 import { buildContext, countTokens } from './services/contextManager.js';
 import * as sessionRepo from './repositories/sessionRepo.js';
 import * as messageRepo from './repositories/messageRepo.js';
@@ -56,13 +58,64 @@ app.use(express.json({ limit: '4mb' }));
 const serverPort = Number(process.env.SERVER_PORT || 8787);
 const serverHost = process.env.SERVER_HOST || '127.0.0.1';
 
-function getErrorPayload(error, fallbackMessage) {
-  if (error && typeof error === 'object' && 'message' in error) {
+interface ErrorPayload {
+  code: string;
+  message: string;
+  details: string;
+  status: number;
+}
+
+interface McpSession {
+  client: McpClient;
+  transport: StdioClientTransport;
+  close(): Promise<void>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object');
+}
+
+function stringField(record: Record<string, unknown>, key: string, fallback = ''): string {
+  const value = record[key];
+  return typeof value === 'string' ? value : fallback;
+}
+
+function numberField(record: Record<string, unknown>, key: string, fallback: number): number {
+  const value = record[key];
+  return typeof value === 'number' ? value : fallback;
+}
+
+function normalizeToolArgs(args: unknown): Record<string, unknown> {
+  return isRecord(args) ? args : {};
+}
+
+function isRagCitation(value: unknown): value is RagCitation {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.index === 'number' &&
+    typeof value.id === 'string' &&
+    typeof value.title === 'string' &&
+    typeof value.snippet === 'string' &&
+    typeof value.source === 'string' &&
+    Array.isArray(value.span) &&
+    value.span.length === 2 &&
+    value.span.every((item) => typeof item === 'number') &&
+    typeof value.score === 'number' &&
+    typeof value.vectorScore === 'number'
+  );
+}
+
+function normalizeRagCitations(citations: unknown): RagCitation[] {
+  return Array.isArray(citations) ? citations.filter(isRagCitation) : [];
+}
+
+function getErrorPayload(error: unknown, fallbackMessage: string): ErrorPayload {
+  if (isRecord(error)) {
     return {
-      code: error.code || 'UNKNOWN_ERROR',
-      message: error.message || fallbackMessage,
-      details: error.details || '',
-      status: error.status || 500
+      code: stringField(error, 'code', 'UNKNOWN_ERROR'),
+      message: stringField(error, 'message', fallbackMessage),
+      details: stringField(error, 'details'),
+      status: numberField(error, 'status', 500)
     };
   }
 
@@ -74,9 +127,9 @@ function getErrorPayload(error, fallbackMessage) {
   };
 }
 
-let mcpSessionPromise = null;
+let mcpSessionPromise: Promise<McpSession> | null = null;
 
-async function createMcpSession() {
+async function createMcpSession(): Promise<McpSession> {
   if (mcpSessionPromise) {
     return mcpSessionPromise;
   }
@@ -134,54 +187,54 @@ async function createMcpSession() {
   return mcpSessionPromise;
 }
 
-function normalizeStructuredContent(result) {
-  if (result && typeof result === 'object' && 'structuredContent' in result && result.structuredContent) {
+function normalizeStructuredContent(result: unknown): Record<string, unknown> {
+  if (isRecord(result) && isRecord(result.structuredContent)) {
     return result.structuredContent;
   }
-  if (result && typeof result === 'object' && 'toolResult' in result) {
+  if (isRecord(result) && isRecord(result.toolResult)) {
     return result.toolResult;
   }
   return {};
 }
 
-function contentToText(result) {
-  if (!result || typeof result !== 'object' || !('content' in result) || !Array.isArray(result.content)) {
+function contentToText(result: unknown): string {
+  if (!isRecord(result) || !Array.isArray(result.content)) {
     return '';
   }
 
   return result.content
-    .filter((item) => item && typeof item === 'object' && item.type === 'text')
+    .filter((item): item is { type: 'text'; text?: string } => isRecord(item) && item.type === 'text')
     .map((item) => item.text || '')
     .join('\n')
     .trim();
 }
 
-async function callMcpTool(name, args = {}) {
+async function callMcpTool(name: string, args: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const session = await createMcpSession();
   const result = await session.client.callTool({ name, arguments: args });
   const structured = normalizeStructuredContent(result);
-  const isError = !!(result && typeof result === 'object' && 'isError' in result && result.isError);
+  const isError = !!(isRecord(result) && result.isError);
   if (isError) {
     throw createAppError(
-      structured.code || 'MCP_TOOL_ERROR',
-      structured.message || `${name} 执行失败`,
-      structured.details || '',
+      stringField(structured, 'code', 'MCP_TOOL_ERROR'),
+      stringField(structured, 'message', `${name} 执行失败`),
+      stringField(structured, 'details'),
       400
     );
   }
   return structured;
 }
 
-app.get('/api/health', async (_, res) => {
+app.get('/api/health', async (_: Request, res: Response) => {
   try {
     const [dbHealth, mcpResult] = await Promise.all([
       Promise.resolve()
         .then(() => checkDatabaseHealth())
-        .catch((error) => ({
+        .catch((error: unknown) => ({
           enabled: true,
           ok: false,
           engine: 'sqlite',
-          reason: error.message || 'database check failed'
+          reason: isRecord(error) ? stringField(error, 'message', 'database check failed') : 'database check failed'
         })),
       (async () => {
         const session = await createMcpSession();
@@ -214,7 +267,7 @@ app.get('/api/health', async (_, res) => {
   }
 });
 
-app.get('/api/knowledge', async (_, res) => {
+app.get('/api/knowledge', async (_: Request, res: Response) => {
   try {
     const session = await createMcpSession();
     const result = await session.client.callTool({
@@ -245,11 +298,11 @@ app.get('/api/knowledge/content/:id', async (req, res) => {
     });
 
     const structured = normalizeStructuredContent(result);
-    if (result.isError) {
+    if (isRecord(result) && result.isError) {
       throw createAppError(
-        structured.code || 'MCP_TOOL_ERROR',
-        structured.message || '获取文档内容失败',
-        structured.details || '',
+        stringField(structured, 'code', 'MCP_TOOL_ERROR'),
+        stringField(structured, 'message', '获取文档内容失败'),
+        stringField(structured, 'details'),
         400
       );
     }
@@ -267,7 +320,7 @@ app.get('/api/knowledge/content/:id', async (req, res) => {
 
 app.post('/api/knowledge/upload', upload.array('files'), async (req, res) => {
   try {
-    const files = Array.isArray(req.files) ? req.files : [];
+    const files = Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : [];
     const session = await createMcpSession();
     const result = await session.client.callTool({
       name: 'ingest_knowledge_documents',
@@ -294,11 +347,11 @@ app.post('/api/knowledge/upload', upload.array('files'), async (req, res) => {
     });
 
     const structured = normalizeStructuredContent(result);
-    if (result.isError) {
+    if (isRecord(result) && result.isError) {
       throw createAppError(
-        structured.code || 'MCP_TOOL_ERROR',
-        structured.message || '知识库导入失败',
-        structured.details || '',
+        stringField(structured, 'code', 'MCP_TOOL_ERROR'),
+        stringField(structured, 'message', '知识库导入失败'),
+        stringField(structured, 'details'),
         400
       );
     }
@@ -326,11 +379,11 @@ app.delete('/api/knowledge/:id', async (req, res) => {
     });
 
     const structured = normalizeStructuredContent(result);
-    if (result.isError) {
+    if (isRecord(result) && result.isError) {
       throw createAppError(
-        structured.code || 'MCP_TOOL_ERROR',
-        structured.message || '删除失败',
-        structured.details || '',
+        stringField(structured, 'code', 'MCP_TOOL_ERROR'),
+        stringField(structured, 'message', '删除失败'),
+        stringField(structured, 'details'),
         400
       );
     }
@@ -346,7 +399,7 @@ app.delete('/api/knowledge/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/knowledge', async (_, res) => {
+app.delete('/api/knowledge', async (_: Request, res: Response) => {
   try {
     const session = await createMcpSession();
     const result = await session.client.callTool({
@@ -355,11 +408,11 @@ app.delete('/api/knowledge', async (_, res) => {
     });
 
     const structured = normalizeStructuredContent(result);
-    if (result.isError) {
+    if (isRecord(result) && result.isError) {
       throw createAppError(
-        structured.code || 'MCP_TOOL_ERROR',
-        structured.message || '清空失败',
-        structured.details || '',
+        stringField(structured, 'code', 'MCP_TOOL_ERROR'),
+        stringField(structured, 'message', '清空失败'),
+        stringField(structured, 'details'),
         400
       );
     }
@@ -468,18 +521,20 @@ app.post('/api/research/spec/generate', async (req, res) => {
 });
 
 /** Agent Runtime 的工具调用适配器：把 CancelNode 的 signal 透传给 MCP */
-async function callAgentTool(toolName, args, signal) {
+async function callAgentTool(toolName: string, args: unknown, signal: AbortSignal): Promise<Record<string, unknown>> {
   const session = await createMcpSession();
-  const result = await session.client.callTool({ name: toolName, arguments: args }, undefined, { signal });
+  const result = await session.client.callTool({ name: toolName, arguments: normalizeToolArgs(args) }, undefined, {
+    signal
+  });
 
   const structured = normalizeStructuredContent(result);
-  const isError = !!(result && typeof result === 'object' && 'isError' in result && result.isError);
+  const isError = !!(isRecord(result) && result.isError);
 
   if (isError) {
     throw createAppError(
-      structured.code || 'MCP_TOOL_ERROR',
-      structured.message || `${toolName} 执行失败`,
-      structured.details || '',
+      stringField(structured, 'code', 'MCP_TOOL_ERROR'),
+      stringField(structured, 'message', `${toolName} 执行失败`),
+      stringField(structured, 'details'),
       400
     );
   }
@@ -501,7 +556,9 @@ app.post('/api/chat/stream', async (req, res) => {
 
   try {
     const incomingMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
-    const question = String([...incomingMessages].reverse().find((item) => item.role === 'user')?.content || '').trim();
+    const question = String(
+      [...incomingMessages].reverse().find((item) => isRecord(item) && item.role === 'user')?.content || ''
+    ).trim();
 
     if (!question) {
       throw createAppError('INVALID_QUESTION', '缺少用户问题', 'messages 中没有 role=user 的消息。', 400);
@@ -515,7 +572,8 @@ app.post('/api/chat/stream', async (req, res) => {
         sessionRepo.ensureSession(sessionId, question.slice(0, 30));
         persist = true;
       } catch (error) {
-        console.error('[chat] 会话落库失败，本轮不持久化:', error.message);
+        const payload = getErrorPayload(error, '会话落库失败');
+        console.error('[chat] 会话落库失败，本轮不持久化:', payload.message);
       }
     }
 
@@ -541,7 +599,7 @@ app.post('/api/chat/stream', async (req, res) => {
     if (persist) {
       messageRepo.appendMessage({ sessionId, role: 'user', content: question, tokenCount: countTokens(question) });
       const draft = messageRepo.appendMessage({ sessionId, role: 'assistant', content: '', status: 'streaming' });
-      assistantMessageId = draft.id;
+      assistantMessageId = draft?.id || null;
     }
 
     const result = await runAgentTurn({
@@ -558,7 +616,15 @@ app.post('/api/chat/stream', async (req, res) => {
         runRag: runAgenticRag,
         // 生成阶段负责注入证据、核查 groundedness，必要时补充检索
         generateAnswer: (ctx, signal, onDelta, meta) =>
-          generateAnswerWithGroundedness({ ctx, signal, onDelta, ...meta })
+          generateAnswerWithGroundedness({
+            ctx: {
+              ...ctx,
+              citations: normalizeRagCitations(ctx.citations)
+            },
+            signal,
+            onDelta,
+            ...meta
+          })
       }
     });
 
@@ -604,7 +670,7 @@ app.post('/api/chat/abort', (req, res) => {
   res.json({ ok: aborted, aborted, activeRuns: getActiveRunCount() });
 });
 
-app.use((error, _req, res, next) => {
+app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
   if (error instanceof multer.MulterError) {
     const message =
       error.code === 'LIMIT_FILE_SIZE'
@@ -624,7 +690,7 @@ app.use((error, _req, res, next) => {
 });
 
 app.use(express.static(path.resolve(__dirname, '../dist')));
-app.get('*', (_, res) => {
+app.get('*', (_: Request, res: Response) => {
   res.sendFile(path.resolve(__dirname, '../dist/index.html'));
 });
 

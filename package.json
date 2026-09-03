@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
-    "dev:server": "tsx ./server/index.js",
+    "dev:server": "tsx ./server/index.ts",
     "build": "vue-tsc -b && vite build && npm run build:server",
     "build:server": "tsc -p tsconfig.server.build.json && node -e \"const fs=require('fs');fs.mkdirSync('.server-build/server/db',{recursive:true});fs.copyFileSync('server/db/schema.sql','.server-build/server/db/schema.sql');\"",
     "preview": "vite preview",
