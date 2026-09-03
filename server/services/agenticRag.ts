@@ -2,8 +2,11 @@ import { z } from 'zod';
 import { qwenConfig } from '../lib/config.js';
 import { qwenFetch as defaultQwenFetch, createEmbedding as defaultCreateEmbedding } from '../lib/apiClients/qwen.js';
 import { rerankOrFallback as defaultRerank } from '../lib/apiClients/rerank.js';
+import type { RerankOutcome } from '../lib/apiClients/rerank.js';
 import * as chunkRepo from '../repositories/chunkRepo.js';
+import type { VectorSearchHit } from '../repositories/chunkRepo.js';
 import * as evidenceRepo from '../repositories/evidenceRepo.js';
+import type { CitationMark } from '../repositories/evidenceRepo.js';
 
 /**
  * Agentic RAG —— 由 Agent 自主规划的多步检索链路。
@@ -34,6 +37,137 @@ const retrievalPlanSchema = z.object({
   reason: z.string().default('')
 });
 
+export type RetrievalPlan = z.infer<typeof retrievalPlanSchema>;
+
+interface ErrorWithCode extends Error {
+  code?: string;
+}
+
+interface CompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
+type QwenFetch = <T = CompletionResponse>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  options?: { signal?: AbortSignal }
+) => Promise<T>;
+
+interface RagEmit {
+  status?: (stage: string, detail?: Record<string, unknown>) => boolean;
+}
+
+interface CancelLike {
+  signal?: AbortSignal;
+  throwIfCancelled?: () => void;
+}
+
+export interface RetrievedEvidence extends Omit<VectorSearchHit, 'score' | 'distance'> {
+  vectorScore: number;
+  query: string;
+  rerankScore?: number;
+  evidenceId?: string;
+}
+
+export interface RagCitation {
+  [key: string]: unknown;
+  index: number;
+  id: string;
+  evidenceId?: string;
+  title: string;
+  snippet: string;
+  source: string;
+  span: [number, number];
+  score: number;
+  vectorScore: number;
+  rerankScore?: number;
+}
+
+export interface RetrievalHop {
+  hop: number;
+  queries: string[];
+  itemCount: number;
+  degraded: boolean;
+  reason?: string;
+}
+
+export interface RetrieveOnceDeps {
+  createEmbedding?: (text: string) => Promise<number[]>;
+  searchChunksByVector?: (embedding: number[], topK?: number) => VectorSearchHit[];
+  rerank?: (
+    query: string,
+    documents: string[],
+    options?: { topN?: number; signal?: AbortSignal }
+  ) => Promise<RerankOutcome>;
+}
+
+export interface RetrieveOnceInput {
+  question: string;
+  queries: string[];
+  seenChunkIds?: Set<string>;
+  topK?: number;
+  topN?: number;
+  deps?: RetrieveOnceDeps;
+  signal?: AbortSignal;
+}
+
+export interface RetrieveOnceResult {
+  items: RetrievedEvidence[];
+  degraded: boolean;
+  reason?: string;
+}
+
+export interface RagDeps extends RetrieveOnceDeps {
+  qwenFetch?: QwenFetch;
+}
+
+export interface PlanRetrievalInput {
+  question: string;
+  contextHint?: string;
+  qwenFetch?: QwenFetch;
+  signal?: AbortSignal;
+}
+
+export interface RewriteWithHydeInput {
+  query: string;
+  qwenFetch?: QwenFetch;
+  signal?: AbortSignal;
+}
+
+export interface RunAgenticRagInput {
+  question: string;
+  contextHint?: string;
+  runId?: string | null;
+  emit?: RagEmit;
+  cancelNode?: CancelLike;
+  persist?: boolean;
+  useHyde?: boolean;
+  deps?: RagDeps;
+}
+
+export interface RunAgenticRagResult {
+  needsRetrieval: boolean;
+  hops: RetrievalHop[];
+  evidence: RetrievedEvidence[];
+  citations: RagCitation[];
+  degraded: boolean;
+  plan: RetrievalPlan;
+}
+
+export interface VerifyGroundednessResult {
+  [key: string]: unknown;
+  grounded: boolean;
+  score: number;
+  unsupported: string[];
+  missingInfo: string;
+  skipped: boolean;
+}
+
+function toErrorWithCode(error: unknown): ErrorWithCode {
+  if (error instanceof Error) return error as ErrorWithCode;
+  return new Error(String(error || '未知错误')) as ErrorWithCode;
+}
+
 const RETRIEVAL_PLANNER_PROMPT = `你是科研问答系统的检索规划器。判断回答用户问题需要怎样检索个人知识库。
 
 规则：
@@ -63,7 +197,7 @@ const GROUNDEDNESS_PROMPT = `你是答案核查器。判断给定答案的每个
 6. 答案中明确说明「知识库没有相关内容」不算幻觉，视为 grounded。`;
 
 /** 从模型输出里抠出 JSON（兼容被 markdown 包裹） */
-function extractJson(text) {
+function extractJson(text: string): unknown {
   if (!text) return null;
   const fenced = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/```\s*([\s\S]*?)```/i);
   const candidate = fenced?.[1] || text;
@@ -77,14 +211,27 @@ function extractJson(text) {
   }
 }
 
-function firstMessageContent(completion) {
-  return completion?.choices?.[0]?.message?.content ?? '';
+function firstMessageContent(completion: unknown): string {
+  if (!completion || typeof completion !== 'object' || !('choices' in completion)) return '';
+  const choices = (completion as { choices?: unknown }).choices;
+  if (!Array.isArray(choices)) return '';
+  const first = choices[0];
+  if (!first || typeof first !== 'object' || !('message' in first)) return '';
+  const message = (first as { message?: unknown }).message;
+  if (!message || typeof message !== 'object' || !('content' in message)) return '';
+  const content = (message as { content?: unknown }).content;
+  return typeof content === 'string' ? content : '';
 }
 
 /**
  * 规划检索策略。规划失败时降级为「单轮、用原问题检索」，不让整条链路挂掉。
  */
-export async function planRetrieval({ question, contextHint = '', qwenFetch = defaultQwenFetch, signal }) {
+export async function planRetrieval({
+  question,
+  contextHint = '',
+  qwenFetch = defaultQwenFetch,
+  signal
+}: PlanRetrievalInput): Promise<RetrievalPlan> {
   const fallback = { needsRetrieval: true, queries: [question], maxHops: 1, reason: '规划失败，按原问题单轮检索' };
 
   try {
@@ -119,8 +266,9 @@ export async function planRetrieval({ question, contextHint = '', qwenFetch = de
     // 轮数不能超过子问题数，否则最后几轮无查询可用
     plan.maxHops = Math.min(plan.maxHops, MAX_HOPS);
     return plan;
-  } catch (error) {
-    if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;
+  } catch (error: unknown) {
+    const err = toErrorWithCode(error);
+    if (err.name === 'AbortError' || err.code === 'CANCELLED') throw error;
     return fallback;
   }
 }
@@ -130,7 +278,11 @@ export async function planRetrieval({ question, contextHint = '', qwenFetch = de
  * 问题与文档在向量空间里往往不同构（问句 vs 陈述句），HyDE 能显著提升召回率。
  * 失败时退回原查询。
  */
-export async function rewriteWithHyde({ query, qwenFetch = defaultQwenFetch, signal }) {
+export async function rewriteWithHyde({
+  query,
+  qwenFetch = defaultQwenFetch,
+  signal
+}: RewriteWithHydeInput): Promise<string> {
   try {
     const completion = await qwenFetch(
       '/chat/completions',
@@ -147,8 +299,9 @@ export async function rewriteWithHyde({ query, qwenFetch = defaultQwenFetch, sig
 
     const text = firstMessageContent(completion).trim();
     return text ? `${query}\n${text}` : query;
-  } catch (error) {
-    if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;
+  } catch (error: unknown) {
+    const err = toErrorWithCode(error);
+    if (err.name === 'AbortError' || err.code === 'CANCELLED') throw error;
     return query;
   }
 }
@@ -166,14 +319,14 @@ export async function retrieveOnce({
   topN = RERANK_TOP_N,
   deps = {},
   signal
-}) {
+}: RetrieveOnceInput): Promise<RetrieveOnceResult> {
   const {
     createEmbedding = defaultCreateEmbedding,
     searchChunksByVector = chunkRepo.searchChunksByVector,
     rerank = defaultRerank
   } = deps;
 
-  const recalled = [];
+  const recalled: RetrievedEvidence[] = [];
   for (const query of queries) {
     const embedding = await createEmbedding(query);
     for (const row of searchChunksByVector(embedding, topK)) {
@@ -213,15 +366,17 @@ export async function retrieveOnce({
   );
 
   const items = ranked
-    .map(({ index, score }) => (recalled[index] ? { ...recalled[index], rerankScore: score } : null))
-    .filter(Boolean)
+    .map(({ index, score }): RetrievedEvidence | null =>
+      recalled[index] ? { ...recalled[index], rerankScore: score } : null
+    )
+    .filter((item): item is RetrievedEvidence => Boolean(item))
     .slice(0, topN);
 
   return { items, degraded, reason };
 }
 
 /** 证据是否已足够回答问题 */
-function isEvidenceSufficient(items, degraded) {
+function isEvidenceSufficient(items: RetrievedEvidence[], degraded: boolean): boolean {
   if (!items.length) return false;
   // 精排降级时分数不可信，只要有召回就先用，避免无意义地多查几轮
   if (degraded) return true;
@@ -251,11 +406,11 @@ export async function runAgenticRag({
   persist = true,
   useHyde = true,
   deps = {}
-}) {
+}: RunAgenticRagInput): Promise<RunAgenticRagResult> {
   const { qwenFetch = defaultQwenFetch } = deps;
   const signal = cancelNode?.signal;
 
-  cancelNode?.throwIfCancelled();
+  cancelNode?.throwIfCancelled?.();
   emit?.status?.('rag_planning', {});
 
   const plan = await planRetrieval({ question, contextHint, qwenFetch, signal });
@@ -265,14 +420,14 @@ export async function runAgenticRag({
     return { needsRetrieval: false, hops: [], evidence: [], citations: [], degraded: false, plan };
   }
 
-  const seenChunkIds = new Set();
-  const hops = [];
-  const evidence = [];
+  const seenChunkIds = new Set<string>();
+  const hops: RetrievalHop[] = [];
+  const evidence: RetrievedEvidence[] = [];
   let degraded = false;
   let queries = plan.queries.length ? plan.queries : [question];
 
   for (let hop = 1; hop <= plan.maxHops; hop++) {
-    cancelNode?.throwIfCancelled();
+    cancelNode?.throwIfCancelled?.();
 
     const effectiveQueries = useHyde
       ? await Promise.all(queries.map((query) => rewriteWithHyde({ query, qwenFetch, signal })))
@@ -340,8 +495,8 @@ export async function runAgenticRag({
   if (persist && runId && citations.length) {
     evidenceRepo.markCited(
       citations
-        .filter((citation) => citation.evidenceId)
-        .map((citation) => ({ evidenceId: citation.evidenceId, citationIndex: citation.index }))
+        .filter((citation): citation is RagCitation & { evidenceId: string } => Boolean(citation.evidenceId))
+        .map((citation): CitationMark => ({ evidenceId: citation.evidenceId, citationIndex: citation.index }))
     );
   }
 
@@ -349,7 +504,17 @@ export async function runAgenticRag({
 }
 
 /** 基于已召回证据规划补充检索的子问题 */
-export async function planFollowUpQueries({ question, evidence, qwenFetch = defaultQwenFetch, signal }) {
+export async function planFollowUpQueries({
+  question,
+  evidence,
+  qwenFetch = defaultQwenFetch,
+  signal
+}: {
+  question: string;
+  evidence: RetrievedEvidence[];
+  qwenFetch?: QwenFetch;
+  signal?: AbortSignal;
+}): Promise<string[]> {
   const digest = evidence
     .slice(0, RERANK_TOP_N)
     .map((item, index) => `[${index + 1}] ${item.text.slice(0, 200)}`)
@@ -374,18 +539,20 @@ export async function planFollowUpQueries({ question, evidence, qwenFetch = defa
     );
 
     const parsed = extractJson(firstMessageContent(completion));
-    const queries = Array.isArray(parsed?.queries)
-      ? parsed.queries.filter((q) => typeof q === 'string' && q.trim())
+    const parsedObject = parsed && typeof parsed === 'object' ? (parsed as { queries?: unknown }) : {};
+    const queries = Array.isArray(parsedObject.queries)
+      ? parsedObject.queries.filter((q): q is string => typeof q === 'string' && Boolean(q.trim()))
       : [];
     return queries.slice(0, 2);
-  } catch (error) {
-    if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;
+  } catch (error: unknown) {
+    const err = toErrorWithCode(error);
+    if (err.name === 'AbortError' || err.code === 'CANCELLED') throw error;
     return [];
   }
 }
 
 /** 把证据整理成带 [^n] 序号的引用列表 */
-export function buildCitations(evidence) {
+export function buildCitations(evidence: RetrievedEvidence[]): RagCitation[] {
   return evidence
     .slice()
     .sort((a, b) => (b.rerankScore ?? b.vectorScore ?? 0) - (a.rerankScore ?? a.vectorScore ?? 0))
@@ -407,7 +574,7 @@ export function buildCitations(evidence) {
  * 把引用列表渲染成注入 prompt 的证据块。
  * 模型据此在答案里写 [^n]，序号与 citations 一一对应。
  */
-export function buildEvidenceBlock(citations) {
+export function buildEvidenceBlock(citations: RagCitation[]): string {
   if (!citations.length) return '';
   return citations
     .map((citation) => `[^${citation.index}] 来源：${citation.title}（相关度 ${citation.score}）\n${citation.snippet}`)
@@ -418,7 +585,17 @@ export function buildEvidenceBlock(citations) {
  * 生成后的 groundedness 动态验证。
  * 验证本身失败时返回 grounded=true 并标记 skipped，避免因核查不可用而误判答案有问题。
  */
-export async function verifyGroundedness({ answer, citations, qwenFetch = defaultQwenFetch, signal }) {
+export async function verifyGroundedness({
+  answer,
+  citations,
+  qwenFetch = defaultQwenFetch,
+  signal
+}: {
+  answer: string;
+  citations: RagCitation[];
+  qwenFetch?: QwenFetch;
+  signal?: AbortSignal;
+}): Promise<VerifyGroundednessResult> {
   if (!answer.trim() || !citations.length) {
     return { grounded: true, score: 1, unsupported: [], missingInfo: '', skipped: true };
   }
@@ -442,15 +619,17 @@ export async function verifyGroundedness({ answer, citations, qwenFetch = defaul
       return { grounded: true, score: 1, unsupported: [], missingInfo: '', skipped: true };
     }
 
+    const parsedObject = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
     return {
-      grounded: Boolean(parsed.grounded),
-      score: Number.isFinite(parsed.score) ? parsed.score : 0,
-      unsupported: Array.isArray(parsed.unsupported) ? parsed.unsupported.slice(0, 3) : [],
-      missingInfo: typeof parsed.missingInfo === 'string' ? parsed.missingInfo : '',
+      grounded: Boolean(parsedObject.grounded),
+      score: Number.isFinite(parsedObject.score) ? Number(parsedObject.score) : 0,
+      unsupported: Array.isArray(parsedObject.unsupported) ? parsedObject.unsupported.slice(0, 3).map(String) : [],
+      missingInfo: typeof parsedObject.missingInfo === 'string' ? parsedObject.missingInfo : '',
       skipped: false
     };
-  } catch (error) {
-    if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;
+  } catch (error: unknown) {
+    const err = toErrorWithCode(error);
+    if (err.name === 'AbortError' || err.code === 'CANCELLED') throw error;
     return { grounded: true, score: 1, unsupported: [], missingInfo: '', skipped: true };
   }
 }

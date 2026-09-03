@@ -3,6 +3,7 @@ import { qwenConfig } from '../lib/config.js';
 import { qwenFetch as defaultQwenFetch } from '../lib/apiClients/qwen.js';
 import * as messageRepo from '../repositories/messageRepo.js';
 import * as sessionRepo from '../repositories/sessionRepo.js';
+import type { MessageRow } from '../db/types.js';
 
 /**
  * 分层 Context 管理 —— 长会话不超限的关键。
@@ -38,14 +39,100 @@ const COMPRESS_PROMPT = `你是对话历史压缩器。把给定的多轮对话�
 4. 使用中文，条目化，200 字以内。
 5. 若已有旧摘要，把旧摘要与新对话合并成一份，不要重复叙述。`;
 
+interface ErrorWithCode extends Error {
+  code?: string;
+}
+
+interface CompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
+type QwenFetch = (
+  endpoint: string,
+  body: Record<string, unknown>,
+  options?: { signal?: AbortSignal }
+) => Promise<CompletionResponse>;
+
+export interface ContextBudget {
+  maxTokens: number;
+  available: number;
+  working: number;
+  shortTerm: number;
+  longTerm: number;
+}
+
+interface RenderedMessage extends MessageRow {
+  renderedText: string;
+  tokens: number;
+}
+
+export interface ShortTermSelection {
+  messages: RenderedMessage[];
+  tokens: number;
+}
+
+export interface FitSummaryResult {
+  text: string;
+  tokens: number;
+  truncated: boolean;
+}
+
+export interface CompressHistoryInput {
+  sessionId: string;
+  beforeSeq: number;
+  previousSummary?: string;
+  summaryUpto?: number;
+  qwenFetch?: QwenFetch;
+  signal?: AbortSignal;
+  persist?: boolean;
+}
+
+export interface CompressHistoryResult {
+  summary: string;
+  summaryUpto: number;
+  compressed: boolean;
+  reason?: string;
+}
+
+export interface BuildContextInput {
+  sessionId: string;
+  question: string;
+  maxTokens?: number;
+  allowCompress?: boolean;
+  persist?: boolean;
+  signal?: AbortSignal;
+  deps?: {
+    qwenFetch?: QwenFetch;
+  };
+}
+
+export interface BuildContextResult {
+  contextHint: string;
+  layers: {
+    working: { question: string; tokens: number };
+    shortTerm: { count: number; tokens: number; scanned: number };
+    longTerm: { tokens: number; truncated: boolean; compressed: boolean; summaryUpto: number };
+  };
+  budget: ContextBudget;
+  usage: {
+    total: number;
+    overBudget: boolean;
+  };
+}
+
+function toErrorWithCode(error: unknown): ErrorWithCode {
+  if (error instanceof Error) return error as ErrorWithCode;
+  return new Error(String(error || '未知错误')) as ErrorWithCode;
+}
+
 /** 精确 token 计数（gpt-tokenizer 的 cl100k 与 Qwen 有差异，但量级足够做预算控制） */
-export function countTokens(text) {
+export function countTokens(text: unknown): number {
   if (!text) return 0;
   return encode(String(text)).length;
 }
 
 /** 按模型上限与安全系数拆出三层配额 */
-export function computeBudget(maxTokens = Number(process.env.CONTEXT_MAX_TOKENS) || DEFAULT_MAX_TOKENS) {
+export function computeBudget(maxTokens = Number(process.env.CONTEXT_MAX_TOKENS) || DEFAULT_MAX_TOKENS): ContextBudget {
   const available = Math.floor(maxTokens * SAFETY_RATIO);
   return {
     maxTokens,
@@ -57,7 +144,7 @@ export function computeBudget(maxTokens = Number(process.env.CONTEXT_MAX_TOKENS)
 }
 
 /** 消息转成注入文本的统一形状 */
-function renderMessage(message) {
+function renderMessage(message: MessageRow): string {
   const content = String(message.content || '')
     .replace(/\s+/g, ' ')
     .slice(0, MESSAGE_CHARS_LIMIT);
@@ -68,8 +155,8 @@ function renderMessage(message) {
  * 从最近往前塞消息，直到用满 Short-Term 配额。
  * 返回结果按时间升序，便于模型理解顺序。
  */
-export function selectShortTerm(messages, budgetTokens) {
-  const selected = [];
+export function selectShortTerm(messages: MessageRow[], budgetTokens: number): ShortTermSelection {
+  const selected: RenderedMessage[] = [];
   let used = 0;
 
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -84,7 +171,7 @@ export function selectShortTerm(messages, budgetTokens) {
 }
 
 /** 摘要超配额时按句截断，尽量保留完整语义单元 */
-export function fitSummary(summary, budgetTokens) {
+export function fitSummary(summary: string, budgetTokens: number): FitSummaryResult {
   if (!summary) return { text: '', tokens: 0, truncated: false };
 
   const tokens = countTokens(summary);
@@ -117,7 +204,7 @@ export async function compressHistory({
   qwenFetch = defaultQwenFetch,
   signal,
   persist = true
-}) {
+}: CompressHistoryInput): Promise<CompressHistoryResult> {
   const pending = messageRepo.listMessagesBefore(sessionId, beforeSeq).filter((message) => message.seq > summaryUpto);
 
   if (pending.length < COMPRESS_TRIGGER_MESSAGES) {
@@ -153,10 +240,11 @@ export async function compressHistory({
 
     if (persist) sessionRepo.updateSessionSummary(sessionId, summary, nextUpto);
     return { summary, summaryUpto: nextUpto, compressed: true };
-  } catch (error) {
-    if (error?.name === 'AbortError' || error?.code === 'CANCELLED') throw error;
+  } catch (error: unknown) {
+    const err = toErrorWithCode(error);
+    if (err.name === 'AbortError' || err.code === 'CANCELLED') throw error;
     // 压缩失败不能让对话中断，沿用旧摘要
-    return { summary: previousSummary, summaryUpto, compressed: false, reason: error?.code || 'COMPRESS_FAILED' };
+    return { summary: previousSummary, summaryUpto, compressed: false, reason: err.code || 'COMPRESS_FAILED' };
   }
 }
 
@@ -179,7 +267,7 @@ export async function buildContext({
   persist = true,
   signal,
   deps = {}
-}) {
+}: BuildContextInput): Promise<BuildContextResult> {
   const { qwenFetch = defaultQwenFetch } = deps;
   const budget = computeBudget(maxTokens);
 

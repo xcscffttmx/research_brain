@@ -5,6 +5,10 @@ import {
   verifyGroundedness as defaultVerify,
   runAgenticRag as defaultRetrieveMore
 } from './agenticRag.js';
+import type { RagCitation, VerifyGroundednessResult } from './agenticRag.js';
+import type { AgentPlan } from '../agent/planner.js';
+import type { CancelNode } from '../agent/cancelTree.js';
+import type { ExecutionResultItem, FailedStep } from '../agent/executor.js';
 
 /**
  * 答案生成阶段 —— Agent Runtime 的最后一环。
@@ -27,8 +31,80 @@ const ANSWER_SYSTEM_PROMPT = [
   '5. 若提供了【检索证据】，每个来自证据的论断后面必须紧跟对应的 [^n] 角标，n 为证据编号；证据之外的内容不要加角标。'
 ].join('\n');
 
+export type Citation = RagCitation;
+
+export interface VerificationResult {
+  grounded?: boolean;
+  skipped?: boolean;
+  missingInfo?: string;
+  [key: string]: unknown;
+}
+
+export interface AnswerContext {
+  question: string;
+  contextHint?: string;
+  plan?: AgentPlan;
+  toolResults?: ExecutionResultItem[];
+  failedSteps?: FailedStep[];
+  citations?: Citation[];
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface RuntimeEmit {
+  status?: (stage: string, detail?: Record<string, unknown>) => boolean;
+}
+
+type QwenFetch = <T = unknown>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  options?: { signal?: AbortSignal }
+) => Promise<T>;
+
+type GenerateAnswer = (ctx: AnswerContext, signal: AbortSignal, onDelta?: (delta: string) => void) => Promise<string>;
+
+interface GroundednessDeps {
+  qwenFetch?: QwenFetch;
+  verify?: (params: {
+    answer: string;
+    citations: Citation[];
+    qwenFetch: QwenFetch;
+    signal?: AbortSignal;
+  }) => Promise<VerificationResult | VerifyGroundednessResult>;
+  retrieveMore?: (params: {
+    question: string;
+    runId?: string;
+    emit?: RuntimeEmit;
+    cancelNode?: CancelNode;
+    persist: boolean;
+    deps: GroundednessDeps;
+  }) => Promise<{ citations?: Citation[] }>;
+  generate?: GenerateAnswer;
+}
+
+export interface GenerateAnswerWithGroundednessInput {
+  ctx: AnswerContext;
+  signal: AbortSignal;
+  onDelta?: (delta: string) => void;
+  emit?: RuntimeEmit;
+  cancelNode?: CancelNode;
+  runId?: string | null;
+  persist?: boolean;
+  deps?: GroundednessDeps;
+}
+
+export interface GenerateAnswerWithGroundednessResult {
+  answer: string;
+  verification: VerificationResult | null;
+  supplemented: boolean;
+  citations: Citation[];
+}
+
 /** 结果体积裁剪：保留结构信息，超长部分截断 */
-function stringifyResult(result) {
+function stringifyResult(result: unknown): string {
   const text = typeof result === 'string' ? result : JSON.stringify(result ?? null);
   if (text.length <= MAX_RESULT_CHARS) return text;
   return `${text.slice(0, MAX_RESULT_CHARS)}…（已截断）`;
@@ -42,8 +118,8 @@ export function buildAnswerMessages({
   toolResults = [],
   failedSteps = [],
   citations = []
-}) {
-  const sections = [];
+}: AnswerContext): ChatMessage[] {
+  const sections: string[] = [];
 
   if (contextHint) {
     sections.push(`【历史上下文摘要】\n${contextHint}`);
@@ -89,8 +165,9 @@ export function buildAnswerMessages({
  *
  * TextDecoder 必须开 stream 模式：中文 token 可能被切在两个 chunk 之间。
  */
-export async function consumeQwenStream(response, onDelta) {
-  const reader = response.body.getReader();
+export async function consumeQwenStream(response: Response, onDelta?: (delta: string) => void): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return '';
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let answer = '';
@@ -112,7 +189,7 @@ export async function consumeQwenStream(response, onDelta) {
         if (raw === '[DONE]') return answer;
 
         try {
-          const json = JSON.parse(raw);
+          const json = JSON.parse(raw) as { choices?: Array<{ delta?: { content?: string } }> };
           const delta = json.choices?.[0]?.delta?.content;
           if (delta) {
             answer += delta;
@@ -137,7 +214,11 @@ export async function consumeQwenStream(response, onDelta) {
  * @param {(delta: string) => void} onDelta
  * @returns {Promise<string>} 完整答案文本
  */
-export async function generateAnswer(ctx, signal, onDelta) {
+export async function generateAnswer(
+  ctx: AnswerContext,
+  signal: AbortSignal,
+  onDelta?: (delta: string) => void
+): Promise<string> {
   const response = await qwenStream(
     '/chat/completions',
     {
@@ -152,17 +233,19 @@ export async function generateAnswer(ctx, signal, onDelta) {
 }
 
 /** 从工具结果里汇总 citations，供前端渲染引用列表 */
-export function collectCitations(toolResults = []) {
-  const seen = new Set();
-  const citations = [];
+export function collectCitations(toolResults: ExecutionResultItem[] = []): Citation[] {
+  const seen = new Set<string>();
+  const citations: Citation[] = [];
 
   for (const item of toolResults) {
-    const list = Array.isArray(item?.result?.citations) ? item.result.citations : [];
+    const result = item.result && typeof item.result === 'object' ? (item.result as { citations?: unknown }) : {};
+    const list = Array.isArray(result.citations) ? result.citations : [];
     for (const citation of list) {
-      const key = citation?.id || citation?.title;
+      const itemCitation = citation as Citation;
+      const key = itemCitation.id || itemCitation.title;
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      citations.push(citation);
+      citations.push(itemCitation);
     }
   }
 
@@ -170,8 +253,8 @@ export function collectCitations(toolResults = []) {
 }
 
 /** 答案里实际出现的 [^n] 角标序号 */
-export function extractCitedIndexes(answer) {
-  const indexes = new Set();
+export function extractCitedIndexes(answer: string): Set<number> {
+  const indexes = new Set<number>();
   for (const match of answer.matchAll(/\[\^(\d+)\]/g)) {
     indexes.add(Number(match[1]));
   }
@@ -195,7 +278,7 @@ export async function generateAnswerWithGroundedness({
   runId = null,
   persist = true,
   deps = {}
-}) {
+}: GenerateAnswerWithGroundednessInput): Promise<GenerateAnswerWithGroundednessResult> {
   const {
     qwenFetch = defaultQwenFetch,
     verify = defaultVerify,
@@ -204,7 +287,7 @@ export async function generateAnswerWithGroundedness({
   } = deps;
 
   const citations = ctx.citations || [];
-  let answer = await generate(ctx, signal, onDelta);
+  const answer = await generate(ctx, signal, onDelta);
 
   if (!citations.length) {
     return { answer, verification: null, supplemented: false, citations };
@@ -220,7 +303,7 @@ export async function generateAnswerWithGroundedness({
   emit?.status?.('supplementing', { missingInfo: verification.missingInfo });
   const extra = await retrieveMore({
     question: verification.missingInfo,
-    runId,
+    runId: runId ?? undefined,
     emit,
     cancelNode,
     persist,
@@ -254,6 +337,6 @@ export async function generateAnswerWithGroundedness({
 }
 
 /** 补充检索的证据要接着前面的序号编号，避免 [^1] 撞号 */
-function renumberCitations(citations, offset) {
+function renumberCitations(citations: Citation[], offset: number): Citation[] {
   return citations.map((citation, position) => ({ ...citation, index: offset + position + 1 }));
 }
