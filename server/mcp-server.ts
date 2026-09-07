@@ -9,16 +9,17 @@ import { z } from 'zod';
 // 拆分后的通用工具与外部客户端（P1-a 抽出）
 import { createAppError } from './lib/errors.js';
 import { uid, normalizeWhitespace } from './lib/utils.js';
-import { qwenFetch, createEmbedding } from './lib/apiClients/qwen.js';
+import { qwenFetch } from './lib/apiClients/qwen.js';
 import { searchArxiv } from './lib/apiClients/arxiv.js';
 import { searchSemanticScholar } from './lib/apiClients/semanticScholar.js';
 import { searchOpenAlex } from './lib/apiClients/openAlex.js';
 import * as chunkRepo from './repositories/chunkRepo.js';
-import type { VectorSearchHit } from './repositories/chunkRepo.js';
 import type { PaperInput } from './repositories/paperRepo.js';
-
-type PdfParser = (buffer: Buffer) => Promise<{ text: string }>;
-type MammothParser = { extractRawText(input: { buffer: Buffer }): Promise<{ value: string }> };
+import { isRecord, toAppError, toErrorContent, toTextContent } from './mcp/toolkit.js';
+import type { McpToolServer } from './mcp/toolkit.js';
+import { registerKnowledgeTools } from './mcp/knowledgeTools.js';
+import { loadDocumentParsers, persistDocumentWithChunks } from './services/knowledgeBase.js';
+import type { KnowledgeCitation } from './services/knowledgeBase.js';
 
 interface AgentInfo {
   id: string;
@@ -73,12 +74,6 @@ interface ExperimentSpec {
   evidenceRefs: Array<{ paperId: string; title: string; reason: string }>;
 }
 
-interface UploadedDocument {
-  name: string;
-  content: string;
-  isBinary?: boolean;
-}
-
 interface CitationInput {
   author: string;
   title: string;
@@ -99,31 +94,6 @@ interface LiteratureWarning {
   details: string;
 }
 
-interface TextChunk {
-  text: string;
-  spanStart: number;
-  spanEnd: number;
-}
-
-interface KnowledgeCitation {
-  id: string;
-  title: string;
-  snippet: string;
-  source: string;
-  score: number;
-}
-
-interface McpTextResult {
-  content: Array<{ type: 'text'; text: string }>;
-  structuredContent: Record<string, unknown>;
-  isError?: boolean;
-}
-
-interface AppErrorLike extends Error {
-  code?: string;
-  details?: string;
-}
-
 interface State {
   agentState: Record<string, Record<string, unknown>>;
   literature: {
@@ -132,34 +102,6 @@ interface State {
     papers: PaperInput[];
     paperSchemas: Record<string, PaperSchemaMemoryRecord>;
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object');
-}
-
-function toAppError(error: unknown, fallbackMessage = '未知错误'): AppErrorLike {
-  if (error instanceof Error) return error as AppErrorLike;
-  return new Error(String(error || fallbackMessage)) as AppErrorLike;
-}
-
-// 尝试导入PDF和DOCX处理库
-let pdf: PdfParser | null = null;
-let mammoth: MammothParser | null = null;
-
-async function loadLibraries() {
-  try {
-    const pdfParse = (await import('pdf-parse')) as unknown as PdfParser & { default?: PdfParser };
-    pdf = typeof pdfParse.default === 'function' ? pdfParse.default : pdfParse;
-    const mammothImport = await import('mammoth');
-    mammoth = (
-      isRecord(mammothImport) && isRecord(mammothImport.default) ? mammothImport.default : mammothImport
-    ) as MammothParser;
-    console.log('PDF和DOCX处理库加载成功');
-  } catch (error) {
-    console.error('PDF和DOCX处理库加载失败:', error);
-    console.log('将使用降级模式，仅支持文本文件');
-  }
 }
 
 const rootEnvPath = path.resolve(process.cwd(), '.env.local');
@@ -233,51 +175,6 @@ async function hydrateState(): Promise<void> {
     state.literature.papers = [];
     state.literature.paperSchemas = {};
   }
-}
-
-/**
- * 定长滑窗分块。返回带原文区间的对象，供证据溯源定位原文位置。
- */
-function chunkText(text: string, chunkSize = 900, overlap = 160): TextChunk[] {
-  const chunks: TextChunk[] = [];
-  let start = 0;
-  while (start < text.length) {
-    const end = Math.min(text.length, start + chunkSize);
-    const raw = text.slice(start, end);
-    const value = raw.trim();
-    if (value) {
-      // trim 会改变边界，这里换算回原文中的真实区间
-      const leading = raw.length - raw.trimStart().length;
-      chunks.push({ text: value, spanStart: start + leading, spanEnd: start + leading + value.length });
-    }
-    start += chunkSize - overlap;
-  }
-  return chunks;
-}
-
-function buildCitation(row: VectorSearchHit): KnowledgeCitation {
-  return {
-    id: row.chunkId,
-    title: row.documentName,
-    snippet: row.text,
-    source: `向量知识库 / ${row.documentName}`,
-    score: Number(row.score.toFixed(4))
-  };
-}
-
-/** 单条相似度下限：低于该值的召回视为噪声 */
-const MIN_VECTOR_SCORE = 0.15;
-
-async function searchKnowledge(query: string, topK = 4): Promise<KnowledgeCitation[]> {
-  if (!chunkRepo.countChunks()) {
-    return [];
-  }
-
-  const queryEmbedding = await createEmbedding(query);
-  return chunkRepo
-    .searchChunksByVector(queryEmbedding, topK)
-    .filter((row) => row.score > MIN_VECTOR_SCORE)
-    .map(buildCitation);
 }
 
 function cacheLiteraturePapers(rows: PaperInput[]): void {
@@ -643,40 +540,6 @@ function buildExperimentSpecFromGap(opportunityItem: ResearchGap, records: Paper
   return experimentSpecShape.parse(spec);
 }
 
-/**
- * 把一篇文档写入知识库：先落文档行，再逐块生成向量后单事务写入。
- * 向量生成放在事务外，避免长时间持有写锁。
- */
-async function persistDocumentWithChunks({
-  name,
-  content,
-  source
-}: {
-  name: string;
-  content: string;
-  source: string;
-}): Promise<NonNullable<ReturnType<typeof chunkRepo.createDocument>>> {
-  const parts = chunkText(content);
-  const items = [];
-  for (const part of parts) {
-    items.push({ ...part, embedding: await createEmbedding(part.text) });
-  }
-
-  const document = chunkRepo.createDocument({
-    name,
-    content,
-    charCount: content.length,
-    sizeBytes: Buffer.byteLength(content, 'utf-8'),
-    source
-  });
-
-  if (!document) {
-    throw createAppError('DOCUMENT_CREATE_FAILED', '知识文件写入失败', '数据库未返回新建文档。', 500);
-  }
-  chunkRepo.insertChunksWithVectors(document.id, items);
-  return document;
-}
-
 async function ingestLiteratureByPaperIds(paperIds: string[]): Promise<Array<Record<string, unknown>>> {
   const inserted: Array<Record<string, unknown>> = [];
 
@@ -730,250 +593,13 @@ async function ingestLiteratureByPaperIds(paperIds: string[]): Promise<Array<Rec
   return inserted;
 }
 
-async function extractTextFromFile(document: UploadedDocument): Promise<string> {
-  const name = document.name.toLowerCase();
-  const content = document.content;
-  const isBinary = document.isBinary || false;
-
-  if (name.endsWith('.pdf')) {
-    // 处理PDF文件
-    if (!pdf) {
-      throw createAppError('PDF_LIBRARY_NOT_LOADED', 'PDF处理库未加载', '请检查依赖安装是否正确。', 500);
-    }
-    try {
-      const pdfData = Buffer.from(content, isBinary ? 'base64' : 'utf-8');
-      const pdfResult = await pdf(pdfData);
-      return pdfResult.text;
-    } catch (error) {
-      console.error(`处理PDF文件时出错:`, error);
-      throw createAppError('PDF_PROCESS_ERROR', 'PDF文件处理失败', toAppError(error).message, 400);
-    }
-  } else if (name.endsWith('.docx')) {
-    // 处理DOCX文件
-    if (!mammoth) {
-      throw createAppError('MAMMOTH_LIBRARY_NOT_LOADED', 'DOCX处理库未加载', '请检查依赖安装是否正确。', 500);
-    }
-    try {
-      const docxData = Buffer.from(content, isBinary ? 'base64' : 'utf-8');
-      const docxResult = await mammoth.extractRawText({ buffer: docxData });
-      return docxResult.value;
-    } catch (error) {
-      console.error(`处理DOCX文件时出错:`, error);
-      throw createAppError('DOCX_PROCESS_ERROR', 'DOCX文件处理失败', toAppError(error).message, 400);
-    }
-  } else {
-    // 其他文本文件直接返回
-    return content;
-  }
-}
-
-async function ingestDocuments(documents: UploadedDocument[]): Promise<Array<Record<string, unknown>>> {
-  const supported = documents.filter((document) => /\.(txt|md|markdown|json|pdf|docx)$/i.test(document.name));
-
-  if (!supported.length) {
-    throw createAppError(
-      'UNSUPPORTED_FILES',
-      '没有可导入的知识文件',
-      '仅支持 `.md`、`.markdown`、`.txt`、`.json`、`.pdf`、`.docx` 文件。',
-      400
-    );
-  }
-
-  const inserted = [];
-
-  for (const source of supported) {
-    let content;
-    try {
-      content = await extractTextFromFile(source);
-    } catch (error) {
-      console.error(`处理文件 ${source.name} 时出错:`, error);
-      continue;
-    }
-
-    content = content.trim();
-    if (!content) continue;
-
-    const document = await persistDocumentWithChunks({ name: source.name, content, source: 'upload' });
-    inserted.push({ id: document.id, name: document.name, createdAt: document.created_at });
-  }
-
-  if (!inserted.length) {
-    throw createAppError('EMPTY_FILES', '上传的文件内容为空', '请确认文件不是空文件，且编码为 UTF-8。', 400);
-  }
-
-  return inserted;
-}
-
-function listDocuments(): Array<Record<string, unknown>> {
-  return chunkRepo.listDocuments().map((document) => ({
-    id: document.id,
-    name: document.name,
-    createdAt: document.created_at,
-    chunkCount: document.chunkCount
-  }));
-}
-
-function getDocumentContent(id: string): Record<string, unknown> {
-  const document = chunkRepo.getDocument(id);
-  if (!document) {
-    throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
-  }
-  return {
-    id: document.id,
-    name: document.name,
-    content: document.content,
-    createdAt: document.created_at
-  };
-}
-
-async function deleteDocument(id: string): Promise<Record<string, unknown>> {
-  if (!chunkRepo.deleteDocument(id)) {
-    throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
-  }
-  return { ok: true, id };
-}
-
-async function clearDocuments(): Promise<Record<string, unknown>> {
-  chunkRepo.clearAllDocuments();
-  return { ok: true };
-}
-
-function toTextContent(value: unknown): McpTextResult {
-  return {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(value, null, 2)
-      }
-    ],
-    structuredContent: isRecord(value) ? value : { value }
-  };
-}
-
-function toErrorContent(error: unknown): McpTextResult {
-  const payload = toAppError(error);
-  return {
-    content: [
-      {
-        type: 'text',
-        text: payload.details ? `${payload.message}\n${payload.details}` : payload.message
-      }
-    ],
-    structuredContent: {
-      code: payload.code || 'UNKNOWN_ERROR',
-      message: payload.message,
-      details: payload.details || ''
-    },
-    isError: true
-  };
-}
-
 const server = new McpServer({
   name: 'research-agent-mcp-server',
   version: '1.0.0'
-}) as unknown as {
-  // MCP SDK 的 registerTool 泛型很重，这里只在注册适配层保留动态 payload。
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerTool: (name: string, config: unknown, handler: (args: any, extra?: any) => unknown) => void;
-  connect: (transport: StdioServerTransport) => Promise<void>;
-};
+}) as unknown as McpToolServer;
 
-server.registerTool(
-  'retrieve_knowledge',
-  {
-    description: '从后端向量知识库检索与用户问题最相关的文档片段',
-    inputSchema: z.object({
-      query: z.string().min(1, 'query 不能为空'),
-      topK: z.number().int().min(1).max(10).optional()
-    })
-  },
-  async ({ query, topK = 4 }) => {
-    try {
-      const citations = await searchKnowledge(query, topK);
-      return toTextContent({ citations, count: citations.length });
-    } catch (error) {
-      return toErrorContent(error);
-    }
-  }
-);
-
-server.registerTool(
-  'list_knowledge_documents',
-  {
-    description: '列出当前后端知识库中的文档',
-    inputSchema: z.object({})
-  },
-  async () => toTextContent({ documents: listDocuments() })
-);
-
-server.registerTool(
-  'get_knowledge_document_content',
-  {
-    description: '获取指定知识文档的完整内容',
-    inputSchema: z.object({
-      id: z.string().min(1, 'id 不能为空')
-    })
-  },
-  async ({ id }) => {
-    try {
-      return toTextContent(getDocumentContent(id));
-    } catch (error) {
-      return toErrorContent(error);
-    }
-  }
-);
-
-server.registerTool(
-  'ingest_knowledge_documents',
-  {
-    description: '导入知识文档到向量知识库中并建立向量索引',
-    inputSchema: z.object({
-      documents: z
-        .array(
-          z.object({
-            name: z.string().min(1, 'name 不能为空'),
-            content: z.string().min(1, 'content 不能为空'),
-            isBinary: z.boolean().optional()
-          })
-        )
-        .min(1, '至少导入一份文档')
-    })
-  },
-  async ({ documents }) => {
-    try {
-      const inserted = await ingestDocuments(documents);
-      return toTextContent({ documents: inserted, message: `已成功导入 ${inserted.length} 份知识文件。` });
-    } catch (error) {
-      return toErrorContent(error);
-    }
-  }
-);
-
-server.registerTool(
-  'delete_knowledge_document',
-  {
-    description: '删除指定的知识文档以及对应的向量索引',
-    inputSchema: z.object({
-      id: z.string().min(1, 'id 不能为空')
-    })
-  },
-  async ({ id }) => {
-    try {
-      return toTextContent(await deleteDocument(id));
-    } catch (error) {
-      return toErrorContent(error);
-    }
-  }
-);
-
-server.registerTool(
-  'clear_knowledge_documents',
-  {
-    description: '清空知识库中的所有文档与向量索引',
-    inputSchema: z.object({})
-  },
-  async () => toTextContent(await clearDocuments())
-);
+// 知识库工具已抽到 mcp/knowledgeTools.ts
+registerKnowledgeTools(server);
 
 server.registerTool(
   'get_current_time',
@@ -2183,6 +1809,6 @@ server.registerTool(
 );
 
 const transport = new StdioServerTransport();
-await loadLibraries();
+await loadDocumentParsers();
 await hydrateState();
 await server.connect(transport);
