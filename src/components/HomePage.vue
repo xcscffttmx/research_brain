@@ -141,7 +141,12 @@
           @toggle-rag="store.toggleRag"
         />
 
-        <AgentTimeline :stage="store.agentStage" :plan="store.activePlan" :verification="store.answerVerification" />
+        <AgentTimeline
+          :stage="store.agentStage"
+          :plan="store.activePlan"
+          :verification="store.answerVerification"
+          :stop-early="store.planStopEarly"
+        />
 
         <AsyncChatPanel :messages="store.messages" />
 

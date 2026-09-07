@@ -55,6 +55,18 @@ export interface AgentPlan {
   steps: AgentPlanStep[];
 }
 
+/**
+ * 计划提前结束的信息（服务端 plan_stopped_early 状态事件）。
+ *
+ * Executor 命中结构化终止条件时跳过剩余步骤，这里记录在第几步之后停下、
+ * 跳过了哪些步骤，以及计划里对终止条件的自然语言描述。
+ */
+export interface PlanStopEarly {
+  afterStep: number;
+  skippedSteps: number[];
+  stopWhen: string;
+}
+
 /** 答案的 groundedness 校验结果（Agentic RAG 动态验证的产物） */
 export interface AnswerVerification {
   grounded: boolean;

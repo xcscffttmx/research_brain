@@ -51,6 +51,48 @@ async function mockChatStream(page: Page) {
   });
 }
 
+/** 三步计划在第 1 步后命中终止条件，跳过第 2、3 步 */
+async function mockStoppedEarlyStream(page: Page) {
+  await page.route('**/api/chat/stream', async (route) => {
+    const body = [
+      sseFrame('status', { stage: 'run_started', runId: 'run-stop' }, 1),
+      sseFrame(
+        'plan',
+        {
+          runId: 'run-stop',
+          intent: '检索知识库后按需补充文献',
+          needsTools: true,
+          stopWhen: '知识库已有足够证据',
+          steps: [
+            { step: 1, tool: 'retrieve_knowledge', reason: '先查本地知识库' },
+            { step: 2, tool: 'search_literature', reason: '证据不足时补充文献' },
+            { step: 3, tool: 'query_paper_memory', reason: '聚合已抽取的论文卡片' }
+          ]
+        },
+        2
+      ),
+      sseFrame('status', { stage: 'executing', totalSteps: 3 }, 3),
+      sseFrame(
+        'status',
+        { stage: 'plan_stopped_early', afterStep: 1, skippedSteps: [2, 3], stopWhen: '知识库已有足够证据' },
+        4
+      ),
+      sseFrame('status', { stage: 'generating' }, 5),
+      sseFrame('delta', { text: ANSWER_TEXT }, 6),
+      sseFrame('done', { reason: 'complete', runId: 'run-stop' }, 7)
+    ].join('');
+
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache'
+      },
+      body
+    });
+  });
+}
+
 async function mockResearchApis(page: Page) {
   await page.route('**/api/research/search-literature', async (route) => {
     await route.fulfill({
@@ -177,4 +219,29 @@ test('知识库主链路：检索文献并产出 Schema / Gap / Spec', async ({ 
   await page.getByRole('button', { name: '生成 Experiment Spec' }).click();
   await expect(page.getByText('Experiment Spec', { exact: true })).toBeVisible();
   await expect(page.getByText(/Vector RAG baseline/)).toBeVisible();
+});
+
+test('计划提前结束时时间线标出被跳过的步骤', async ({ page }) => {
+  // 覆盖 beforeEach 里的默认对话打桩
+  await mockStoppedEarlyStream(page);
+  await page.goto('/');
+
+  await page.getByPlaceholder(/问问 research-agent/).fill(QUESTION_TEXT);
+  await page.getByRole('button', { name: '发送' }).click();
+
+  await expect(page.getByText(ANSWER_TEXT)).toBeVisible();
+
+  // 提前结束标签展示跳过的步数
+  await expect(page.getByText('提前结束 · 跳过 2 步')).toBeVisible();
+
+  // 第 1 步真的跑过，第 2、3 步被标记为已跳过
+  const steps = page.locator('.el-step');
+  await expect(steps).toHaveCount(3);
+  await expect(steps.nth(0)).not.toHaveClass(/step-skipped/);
+  await expect(steps.nth(1)).toHaveClass(/step-skipped/);
+  await expect(steps.nth(2)).toHaveClass(/step-skipped/);
+  // simple 模式只渲染 title，所以「已跳过」标在标题上
+  await expect(page.getByText('search_literature（已跳过）')).toBeVisible();
+  await expect(page.getByText('query_paper_memory（已跳过）')).toBeVisible();
+  await expect(page.getByText('retrieve_knowledge', { exact: true })).toBeVisible();
 });

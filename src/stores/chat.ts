@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { abortAgentRun, streamAgentChat } from '@/services/qwen';
-import type { AgentPlan, AnswerVerification, ChatMessage } from '@/types/chat';
+import type { AgentPlan, AnswerVerification, ChatMessage, PlanStopEarly } from '@/types/chat';
 import { useRenderBuffer } from '@/composables/useRenderBuffer';
 import { useTypewriter } from '@/composables/useTypewriter';
+import { readStopEarly } from '@/utils/agentStage';
 import { createMessage, mergeTool, toConversationMessages, uid } from './chatHelpers';
 import { useKnowledgeStore } from './knowledge';
 import { useSessionStore } from './session';
@@ -31,6 +32,8 @@ export const useChatStore = defineStore('chat', () => {
   const activeRunId = ref<string | null>(null);
   const activePlan = ref<AgentPlan | null>(null);
   const agentStage = ref('');
+  /** 命中终止条件提前结束的信息，正常走完为 null */
+  const planStopEarly = ref<PlanStopEarly | null>(null);
   /** 最近一轮回答的 groundedness 校验结果 */
   const answerVerification = ref<AnswerVerification | null>(null);
   /** 当前流的打字机与渲染缓冲实例，以及上一轮的刷新统计（性能演示用） */
@@ -133,6 +136,7 @@ export const useChatStore = defineStore('chat', () => {
     activeRunId.value = null;
     activePlan.value = null;
     agentStage.value = '';
+    planStopEarly.value = null;
     answerVerification.value = null;
 
     // 流式 token 先进缓冲队列，由 rAF 批量写回响应式状态，避免每个字符触发一次渲染
@@ -166,6 +170,9 @@ export const useChatStore = defineStore('chat', () => {
             agentStage.value = event.stage || '';
             if (event.stage === 'run_started' && event.detail?.runId) {
               activeRunId.value = String(event.detail.runId);
+            }
+            if (event.stage === 'plan_stopped_early') {
+              planStopEarly.value = readStopEarly(event.detail);
             }
           }
 
@@ -253,6 +260,7 @@ export const useChatStore = defineStore('chat', () => {
     activeRunId,
     activePlan,
     agentStage,
+    planStopEarly,
     answerVerification,
     renderStats,
     appendInput,

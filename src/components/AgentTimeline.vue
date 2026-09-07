@@ -6,13 +6,19 @@
       <el-tooltip v-if="verification" :content="verificationTooltip" placement="top">
         <el-tag :type="verificationTagType" effect="light" round size="small">{{ verificationLabel }}</el-tag>
       </el-tooltip>
+      <el-tooltip v-if="stopEarly" :content="stopEarlyTooltip" placement="top">
+        <el-tag type="warning" effect="light" round size="small">
+          提前结束 · 跳过 {{ stopEarly.skippedSteps.length }} 步
+        </el-tag>
+      </el-tooltip>
     </div>
 
     <el-steps v-if="plan?.steps?.length" :active="activeStep" align-center finish-status="success" simple>
       <el-step
         v-for="step in plan.steps"
         :key="step.step"
-        :title="step.tool"
+        :class="{ 'step-skipped': skippedSteps.has(step.step) }"
+        :title="stepTitle(step)"
         :description="step.optional ? `${step.reason ?? ''}（可选）` : step.reason"
       />
     </el-steps>
@@ -22,16 +28,39 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { resolveActiveStep, stageLabel } from '@/utils/agentStage';
-import type { AgentPlan, AnswerVerification } from '@/types/chat';
+import type { AgentPlan, AgentPlanStep, AnswerVerification, PlanStopEarly } from '@/types/chat';
 
 const props = defineProps<{
   stage: string;
   plan: AgentPlan | null;
   verification: AnswerVerification | null;
+  stopEarly: PlanStopEarly | null;
 }>();
 
-const visible = computed(() => Boolean(props.stage || props.plan?.steps?.length || props.verification));
-const activeStep = computed(() => resolveActiveStep(props.stage, props.plan?.steps?.length ?? 0));
+const visible = computed(() =>
+  Boolean(props.stage || props.plan?.steps?.length || props.verification || props.stopEarly)
+);
+const activeStep = computed(() =>
+  resolveActiveStep(props.stage, props.plan?.steps?.length ?? 0, props.stopEarly?.afterStep ?? null)
+);
+
+const skippedSteps = computed(() => new Set(props.stopEarly?.skippedSteps ?? []));
+
+/**
+ * 被跳过的步骤在标题上标注。
+ * el-steps 的 simple 模式不渲染 description，所以标记必须放在 title 上才可见。
+ */
+function stepTitle(step: AgentPlanStep): string {
+  return skippedSteps.value.has(step.step) ? `${step.tool}（已跳过）` : step.tool;
+}
+
+const stopEarlyTooltip = computed(() => {
+  const stopEarly = props.stopEarly;
+  if (!stopEarly) return '';
+  const skipped = stopEarly.skippedSteps.join('、');
+  const reason = stopEarly.stopWhen ? `终止条件：${stopEarly.stopWhen}` : '已满足计划里的终止条件';
+  return `第 ${stopEarly.afterStep} 步后${reason}，跳过第 ${skipped} 步`;
+});
 
 const verificationLabel = computed(() => {
   const verification = props.verification;
@@ -78,5 +107,10 @@ const verificationTooltip = computed(() => {
 .agent-timeline-intent {
   font-size: 13px;
   color: var(--muted);
+}
+
+/* 被跳过的步骤压低视觉权重，和真正跑过的步骤区分开 */
+.step-skipped {
+  opacity: 0.55;
 }
 </style>
