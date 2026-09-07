@@ -25,8 +25,8 @@
   - `src/services/`：前端 API 封装
   - `src/stores/`：Pinia 状态管理
   - `src/types/`：共享类型
-  - `server/index.js`：HTTP 入口
-  - `server/mcp-server.js`：MCP 入口
+  - `server/index.ts`：HTTP 入口
+  - `server/mcp-server.ts`：MCP 入口
 - 后续新增后端能力时优先放置：
   - `server/lib/`：纯工具函数与外部客户端封装
   - `server/services/`：业务编排
@@ -43,6 +43,8 @@
 - 测试约定
   - 新增或改动核心逻辑时，必须补充可执行测试（后续统一挂到 `npm test`）。
   - 每次阶段性交付至少执行一次构建验证（`npm run build`）。
+  - 端到端用例放在 `e2e/`，通过 `npm run test:e2e` 运行。本地复用系统 Chrome
+    （`playwright.config.ts` 里 `channel: 'chrome'`），CI 上用 Playwright 自带 chromium。
 
 ## 4) 生成内容要求
 
