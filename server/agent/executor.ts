@@ -2,7 +2,7 @@ import { CancelledError } from './cancelTree.js';
 import type { CancelNode } from './cancelTree.js';
 import { runWithPolicy } from './policy.js';
 import type { RetryPolicy } from './policy.js';
-import type { AgentPlan } from './planner.js';
+import type { AgentPlan, StopCondition } from './planner.js';
 import * as agentRunRepo from '../repositories/agentRunRepo.js';
 import type { ToolCallStatus } from '../db/types.js';
 
@@ -46,11 +46,22 @@ export interface FailedStep {
   message?: string;
 }
 
+/** 命中的终止条件，用于落库与前端展示 */
+export interface StopConditionHit {
+  /** 在第几步之后命中 */
+  afterStep: number;
+  condition: StopCondition;
+  /** 被跳过的剩余步骤序号 */
+  skippedSteps: number[];
+}
+
 export interface ExecutePlanResult {
   scratchpad: Scratchpad;
   results: ExecutionResultItem[];
   failedSteps: FailedStep[];
   aborted: boolean;
+  /** 命中终止条件提前结束时有值，正常走完为 null */
+  stoppedEarly: StopConditionHit | null;
 }
 
 function toErrorWithCode(error: unknown): ErrorWithCode {
@@ -118,6 +129,56 @@ export function readPath(source: unknown, path: string): unknown {
   return current;
 }
 
+/** 单个终止条件求值。数组/字符串参与 gte/gt 比较时取长度 */
+export function matchStopCondition(condition: StopCondition, scratchpad: Scratchpad): boolean {
+  const actual = readPath(scratchpad, condition.path);
+
+  switch (condition.op) {
+    case 'exists':
+      return actual !== undefined && actual !== null;
+    case 'nonEmpty':
+      if (Array.isArray(actual)) return actual.length > 0;
+      if (typeof actual === 'string') return actual.trim().length > 0;
+      if (actual && typeof actual === 'object') return Object.keys(actual).length > 0;
+      return false;
+    case 'eq':
+      return actual === condition.value;
+    case 'gte':
+    case 'gt': {
+      const left = toComparableNumber(actual);
+      const right = typeof condition.value === 'number' ? condition.value : Number(condition.value);
+      if (left === null || !Number.isFinite(right)) return false;
+      return condition.op === 'gte' ? left >= right : left > right;
+    }
+    default:
+      return false;
+  }
+}
+
+/** 数字直接用；数组/字符串取长度；其余不可比较 */
+function toComparableNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value) || typeof value === 'string') return value.length;
+  return null;
+}
+
+/**
+ * 检查是否满足提前结束条件。
+ * 只有「本步之后仍有剩余步骤」时才有意义，所以由调用方保证 currentStep 不是最后一步。
+ */
+export function evaluateStopConditions(
+  conditions: StopCondition[] = [],
+  scratchpad: Scratchpad,
+  currentStep: number
+): StopCondition | null {
+  for (const condition of conditions) {
+    // afterStep 未指定表示每步之后都检查
+    if (condition.afterStep !== undefined && condition.afterStep !== currentStep) continue;
+    if (matchStopCondition(condition, scratchpad)) return condition;
+  }
+  return null;
+}
+
 /**
  * 执行整个计划。
  *
@@ -146,7 +207,7 @@ export async function executePlan({
   const results: ExecutionResultItem[] = [];
   const failedSteps: FailedStep[] = [];
 
-  for (const step of plan.steps) {
+  for (const [index, step] of plan.steps.entries()) {
     cancelNode.throwIfCancelled();
 
     const stepNode = cancelNode.child(`step-${step.step}`);
@@ -210,6 +271,28 @@ export async function executePlan({
       });
 
       stepNode.detach();
+
+      // 终止条件：已拿到足够结果就跳过剩余步骤，省掉后续工具调用的耗时与配额
+      const remainingSteps = plan.steps.slice(index + 1);
+      if (remainingSteps.length) {
+        const hit = evaluateStopConditions(plan.stopConditions, scratchpad, step.step);
+        if (hit) {
+          const skippedSteps = remainingSteps.map((s) => s.step);
+          emit?.status?.('plan_stopped_early', {
+            afterStep: step.step,
+            condition: hit,
+            skippedSteps,
+            stopWhen: plan.stopWhen
+          });
+          return {
+            scratchpad,
+            results,
+            failedSteps,
+            aborted: false,
+            stoppedEarly: { afterStep: step.step, condition: hit, skippedSteps }
+          };
+        }
+      }
     } catch (error: unknown) {
       stepNode.detach();
       const err = toErrorWithCode(error);
@@ -245,10 +328,10 @@ export async function executePlan({
 
       // 关键步骤失败则终止整个计划；可选步骤失败则继续
       if (!step.optional) {
-        return { scratchpad, results, failedSteps, aborted: true };
+        return { scratchpad, results, failedSteps, aborted: true, stoppedEarly: null };
       }
     }
   }
 
-  return { scratchpad, results, failedSteps, aborted: false };
+  return { scratchpad, results, failedSteps, aborted: false, stoppedEarly: null };
 }

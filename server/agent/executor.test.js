@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createCancelRoot, CancelReason, CancelledError } from './cancelTree.js';
-import { executePlan, resolveArgs, readPath } from './executor.js';
+import { executePlan, resolveArgs, readPath, matchStopCondition, evaluateStopConditions } from './executor.js';
 import { createAppError } from '../lib/errors.js';
 
 // ---------- 参数插值与结果回填 ----------
@@ -61,8 +61,8 @@ describe('resolveArgs 结果回填', () => {
 
 // ---------- 计划执行 ----------
 
-function makePlan(steps) {
-  return { needsTools: true, intent: 'test', steps, stopWhen: 'done' };
+function makePlan(steps, stopConditions = []) {
+  return { needsTools: true, intent: 'test', steps, stopWhen: 'done', stopConditions };
 }
 
 describe('executePlan 正常流程', () => {
@@ -344,5 +344,103 @@ describe('executePlan 事件发射', () => {
     const retryEvent = statuses.find((x) => x.s === 'tool_retry');
     expect(retryEvent).toBeTruthy();
     expect(retryEvent.d.errorCode).toBe('RATE_LIMITED');
+  });
+});
+
+// ---------- 终止条件 ----------
+
+describe('matchStopCondition', () => {
+  const scratchpad = { step1: { count: 3, citations: ['a', 'b'], title: '  ', done: true, empty: [] } };
+
+  it('exists 只看有没有值', () => {
+    expect(matchStopCondition({ path: 'step1.count', op: 'exists' }, scratchpad)).toBe(true);
+    expect(matchStopCondition({ path: 'step1.missing', op: 'exists' }, scratchpad)).toBe(false);
+  });
+
+  it('nonEmpty 对数组/字符串/对象分别判空', () => {
+    expect(matchStopCondition({ path: 'step1.citations', op: 'nonEmpty' }, scratchpad)).toBe(true);
+    expect(matchStopCondition({ path: 'step1.empty', op: 'nonEmpty' }, scratchpad)).toBe(false);
+    // 纯空白字符串按空处理
+    expect(matchStopCondition({ path: 'step1.title', op: 'nonEmpty' }, scratchpad)).toBe(false);
+  });
+
+  it('gte/gt 支持数组取长度比较', () => {
+    expect(matchStopCondition({ path: 'step1.count', op: 'gte', value: 3 }, scratchpad)).toBe(true);
+    expect(matchStopCondition({ path: 'step1.count', op: 'gt', value: 3 }, scratchpad)).toBe(false);
+    expect(matchStopCondition({ path: 'step1.citations', op: 'gte', value: 2 }, scratchpad)).toBe(true);
+  });
+
+  it('eq 严格相等，路径不存在时不命中', () => {
+    expect(matchStopCondition({ path: 'step1.done', op: 'eq', value: true }, scratchpad)).toBe(true);
+    expect(matchStopCondition({ path: 'step1.missing', op: 'eq', value: true }, scratchpad)).toBe(false);
+  });
+});
+
+describe('evaluateStopConditions', () => {
+  const scratchpad = { step1: { count: 5 } };
+
+  it('afterStep 只在指定步之后生效', () => {
+    const conditions = [{ afterStep: 2, path: 'step1.count', op: 'gte', value: 1 }];
+    expect(evaluateStopConditions(conditions, scratchpad, 1)).toBeNull();
+    expect(evaluateStopConditions(conditions, scratchpad, 2)).toEqual(conditions[0]);
+  });
+
+  it('afterStep 缺省表示每步都检查', () => {
+    const conditions = [{ path: 'step1.count', op: 'gte', value: 5 }];
+    expect(evaluateStopConditions(conditions, scratchpad, 1)).toEqual(conditions[0]);
+  });
+
+  it('没有条件时返回 null', () => {
+    expect(evaluateStopConditions([], scratchpad, 1)).toBeNull();
+    expect(evaluateStopConditions(undefined, scratchpad, 1)).toBeNull();
+  });
+});
+
+describe('executePlan 提前结束', () => {
+  const twoSteps = [
+    { step: 1, tool: 'retrieve_knowledge', args: {}, reason: 'r1', optional: false },
+    { step: 2, tool: 'search_literature', args: {}, reason: 'r2', optional: false }
+  ];
+
+  it('命中条件时跳过剩余步骤并上报 status', async () => {
+    const root = createCancelRoot('run');
+    const callTool = vi.fn(async () => ({ count: 4 }));
+    const statuses = [];
+    const emit = { toolCall: () => {}, toolResult: () => {}, status: (s, d) => statuses.push({ s, d }) };
+    const plan = makePlan(twoSteps, [{ afterStep: 1, path: 'step1.count', op: 'gte', value: 3 }]);
+
+    const out = await executePlan({ plan, runId: 'run', cancelNode: root, callTool, emit, persist: false });
+
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(out.results).toHaveLength(1);
+    expect(out.aborted).toBe(false);
+    expect(out.stoppedEarly).toEqual({
+      afterStep: 1,
+      condition: plan.stopConditions[0],
+      skippedSteps: [2]
+    });
+    expect(statuses.find((x) => x.s === 'plan_stopped_early').d.skippedSteps).toEqual([2]);
+  });
+
+  it('条件未满足时照常走完所有步骤', async () => {
+    const root = createCancelRoot('run');
+    const callTool = vi.fn(async () => ({ count: 1 }));
+    const plan = makePlan(twoSteps, [{ afterStep: 1, path: 'step1.count', op: 'gte', value: 3 }]);
+
+    const out = await executePlan({ plan, runId: 'run', cancelNode: root, callTool, persist: false });
+
+    expect(callTool).toHaveBeenCalledTimes(2);
+    expect(out.stoppedEarly).toBeNull();
+  });
+
+  it('最后一步命中不算提前结束（没有步骤可跳过）', async () => {
+    const root = createCancelRoot('run');
+    const callTool = vi.fn(async () => ({ count: 9 }));
+    const plan = makePlan([twoSteps[0]], [{ path: 'step1.count', op: 'gte', value: 1 }]);
+
+    const out = await executePlan({ plan, runId: 'run', cancelNode: root, callTool, persist: false });
+
+    expect(out.stoppedEarly).toBeNull();
+    expect(out.results).toHaveLength(1);
   });
 });

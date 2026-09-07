@@ -212,7 +212,13 @@ export async function runAgentTurn({
     cancelRoot.throwIfCancelled();
 
     // ---------- 3. 执行工具链 ----------
-    let execution: ExecutePlanResult = { scratchpad: {}, results: [], failedSteps: [], aborted: false };
+    let execution: ExecutePlanResult = {
+      scratchpad: {},
+      results: [],
+      failedSteps: [],
+      aborted: false,
+      stoppedEarly: null
+    };
 
     if (plan.needsTools && plan.steps.length) {
       emit?.status?.('executing', { totalSteps: plan.steps.length });
@@ -279,7 +285,8 @@ export async function runAgentTurn({
       verification,
       toolResults: execution.results,
       failedSteps: execution.failedSteps,
-      partial: execution.aborted
+      partial: execution.aborted,
+      stoppedEarly: execution.stoppedEarly
     };
   } catch (error: unknown) {
     const err = toRuntimeError(error);

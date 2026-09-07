@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createPlan, createDirectAnswerPlan, extractJsonObject, planSchema, TOOL_CATALOG } from './planner.js';
+import {
+  createPlan,
+  createDirectAnswerPlan,
+  extractJsonObject,
+  normalizeStopConditions,
+  planSchema,
+  TOOL_CATALOG
+} from './planner.js';
 import { createCancelRoot, CancelReason, CancelledError } from './cancelTree.js';
 
 /** 构造一个模拟 qwenFetch，返回指定的模型输出 */
@@ -214,6 +221,29 @@ describe('createDirectAnswerPlan', () => {
     expect(plan.needsTools).toBe(false);
     expect(plan.steps).toEqual([]);
     expect(plan.intent).toBe('测试');
+    expect(plan.stopConditions).toEqual([]);
+  });
+});
+
+describe('normalizeStopConditions', () => {
+  it('丢弃永远触发不了的条件', () => {
+    const conditions = [
+      { afterStep: 1, path: 'step1.count', op: 'gte', value: 3 },
+      // afterStep 等于总步数，后面已无步骤可跳过
+      { afterStep: 2, path: 'step2.count', op: 'gte', value: 3 },
+      // gte 缺 value 无法求值
+      { afterStep: 1, path: 'step1.count', op: 'gte' }
+    ];
+    expect(normalizeStopConditions(conditions, 2)).toEqual([conditions[0]]);
+  });
+
+  it('无工具步骤时条件全部清空', () => {
+    expect(normalizeStopConditions([{ path: 'step1.count', op: 'exists' }], 0)).toEqual([]);
+  });
+
+  it('afterStep 缺省的条件保留', () => {
+    const conditions = [{ path: 'step1.citations', op: 'nonEmpty' }];
+    expect(normalizeStopConditions(conditions, 3)).toEqual(conditions);
   });
 });
 
