@@ -24,6 +24,27 @@ import * as agentRunRepo from './repositories/agentRunRepo.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * 解析前端 dist 目录。源码运行时 __dirname 是 server/，../dist 指向仓库根 dist；
+ * 编译后 .server-build/server/index.js 的 __dirname 是 .server-build/server/，
+ * 这时 ../dist 会指向 .server-build/dist 而不是仓库根 dist，所以额外再尝试一次
+ * process.cwd() 兜底（Docker / 手动部署常用此方式）。三个候选都不存在就抛错，
+ * 避免在生产里静默返回 404。
+ */
+function resolveDistDir(): string {
+  const candidates = [
+    path.resolve(__dirname, '../dist'),
+    path.resolve(__dirname, '../../dist'),
+    path.resolve(process.cwd(), 'dist')
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, 'index.html'))) {
+      return candidate;
+    }
+  }
+  throw new Error(`无法定位前端 dist 目录，已尝试：\n  ${candidates.join('\n  ')}\n请先执行 npm run build。`);
+}
+
 const rootEnvPath = path.resolve(__dirname, '../.env.local');
 dotenv.config({ path: rootEnvPath, override: true });
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true });
@@ -693,9 +714,10 @@ app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
   next(error);
 });
 
-app.use(express.static(path.resolve(__dirname, '../dist')));
+const distDir = resolveDistDir();
+app.use(express.static(distDir));
 app.get('*', (_: Request, res: Response) => {
-  res.sendFile(path.resolve(__dirname, '../dist/index.html'));
+  res.sendFile(path.join(distDir, 'index.html'));
 });
 
 app.listen(serverPort, serverHost, () => {
