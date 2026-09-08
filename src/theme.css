@@ -44,6 +44,19 @@ html.dark {
   --logo-orbit-ring: rgba(124, 173, 245, 0.18);
   --delete-hover-bg: rgba(255, 255, 255, 0.08);
   --icon-muted: #6e7687;
+
+  /* 头像 / 输入框 / 弹窗：暗色下沉，文字反相 */
+  --hero-chip-bg: #1d2027;
+  --avatar-bg: linear-gradient(135deg, #24405f, #1b2635);
+  --avatar-text: #cfe1ff;
+  --user-avatar-bg: #2a2f38;
+  --user-avatar-text: #c8cdd5;
+  --composer-bg: #1d2027;
+  --notice-bg: rgba(76, 175, 105, 0.16);
+  --modal-item-hover-bg: rgba(255, 255, 255, 0.06);
+  --modal-icon-bg: rgba(124, 173, 245, 0.18);
+  --modal-title-color: #f2f4f8;
+  --modal-desc-color: #9aa3b2;
 }
 
 :root,

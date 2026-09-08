@@ -34,6 +34,19 @@
   --logo-orbit-ring: rgba(255, 255, 255, 0.14);
   --delete-hover-bg: #dadce0;
   --icon-muted: #9aa0a6;
+
+  /* 头像 / 输入框 / 弹窗 等表面元素的暗色变量 */
+  --hero-chip-bg: #ffffff;
+  --avatar-bg: linear-gradient(135deg, #d2e3fc, #f6f9ff);
+  --avatar-text: #365b9e;
+  --user-avatar-bg: #e8eaed;
+  --user-avatar-text: #3c4043;
+  --composer-bg: rgba(255, 255, 255, 0.98);
+  --notice-bg: #f1fbf3;
+  --modal-item-hover-bg: #f1f3f4;
+  --modal-icon-bg: #e8f0fe;
+  --modal-title-color: #202124;
+  --modal-desc-color: #5f6368;
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -352,11 +365,6 @@ button:disabled {
   display: grid;
 }
 
-.history-item-delete:hover {
-  background: #dadce0;
-  color: #d93025;
-}
-
 .sidebar-branding,
 .topbar-left,
 .topbar-right,
@@ -421,7 +429,7 @@ button:disabled {
   right: 9px;
   width: 10px;
   height: 10px;
-  box-shadow: 0 0 0 5px var(--logo-orbit-ring, rgba(255, 255, 255, 0.14));
+  box-shadow: 0 0 0 5px var(--logo-orbit-ring);
 }
 
 .logo-orbit-b {
@@ -550,7 +558,7 @@ button:disabled {
   padding: 8px 14px;
   border-radius: 999px;
   color: var(--accent-strong);
-  background: #fff;
+  background: var(--hero-chip-bg);
   border: 1px solid var(--panel-line);
 }
 
@@ -567,14 +575,14 @@ button:disabled {
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #d2e3fc, #f6f9ff);
-  color: #365b9e;
+  background: var(--avatar-bg);
+  color: var(--avatar-text);
   font-weight: 700;
 }
 
 .message-user .avatar-dot {
-  background: #e8eaed;
-  color: #3c4043;
+  background: var(--user-avatar-bg);
+  color: var(--user-avatar-text);
 }
 
 .message-main {
@@ -630,7 +638,7 @@ button:disabled {
   gap: 6px;
   padding: 8px 14px;
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--composer-bg);
   position: sticky;
   bottom: 12px;
 }
@@ -659,7 +667,7 @@ button:disabled {
   padding: 14px 16px;
   border-radius: 16px;
   color: var(--success);
-  background: #f1fbf3;
+  background: var(--notice-bg);
 }
 
 .mobile-mask {
@@ -787,14 +795,14 @@ button:disabled {
 }
 
 .agent-modal-item:hover {
-  background: #f1f3f4;
+  background: var(--modal-item-hover-bg);
 }
 
 .agent-modal-icon {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: #e8f0fe;
+  background: var(--modal-icon-bg);
   display: grid;
   place-items: center;
   font-size: 0.95rem;
@@ -811,13 +819,13 @@ button:disabled {
 .agent-modal-info strong {
   display: block;
   font-size: 0.95rem;
-  color: #202124;
+  color: var(--modal-title-color);
   margin-bottom: 4px;
 }
 
 .agent-modal-info p {
   margin: 0;
   font-size: 0.84rem;
-  color: #5f6368;
+  color: var(--modal-desc-color);
   line-height: 1.4;
 }
