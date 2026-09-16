@@ -8,6 +8,10 @@ export interface Citation {
   snippet: string;
   source: string;
   score?: number;
+  /** 命中片段所属知识库文档 id，用于点引用跳原文；旧数据可能为空 */
+  documentId?: string;
+  /** 命中片段在原文中的字符区间 [start, end)，用于跳转后高亮 */
+  span?: [number, number];
 }
 
 export interface ToolInvocation {

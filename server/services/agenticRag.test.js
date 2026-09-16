@@ -333,6 +333,22 @@ describe('buildCitations / buildEvidenceBlock', () => {
     expect(citations[0].score).toBe(0.7);
   });
 
+  it('透出 documentId，供前端点引用跳原文用', () => {
+    const citations = buildCitations([
+      {
+        chunkId: 'c1',
+        documentId: 'doc-42',
+        documentName: 'a.md',
+        text: 'A',
+        spanStart: 5,
+        spanEnd: 9,
+        vectorScore: 0.5
+      }
+    ]);
+    expect(citations[0].documentId).toBe('doc-42');
+    expect(citations[0].span).toEqual([5, 9]);
+  });
+
   it('证据块带 [^n] 标记，空列表返回空串', () => {
     const block = buildEvidenceBlock(
       buildCitations([{ chunkId: 'c1', documentName: 'a.md', text: '正文', vectorScore: 0.5 }])

@@ -633,6 +633,28 @@ button:disabled {
   border-radius: 18px;
 }
 
+/* 带 documentId 的引用卡片可点击跳原文 */
+.source-card-clickable {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
+}
+
+.source-card-clickable:hover {
+  border-color: var(--accent-strong);
+}
+
+.source-card-clickable:active {
+  transform: translateY(1px);
+}
+
 .composer-shell {
   display: grid;
   gap: 6px;

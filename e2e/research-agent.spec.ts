@@ -14,6 +14,16 @@ function sseFrame(event: string, data: Record<string, unknown>, id: number) {
 const ANSWER_TEXT = 'Agentic RAG 通过检索、精排和证据校验降低幻觉。';
 const QUESTION_TEXT = 'Agentic RAG 如何降低幻觉？';
 const PAPER_TITLE = 'Agentic Retrieval for Grounded Research Assistants';
+const CITED_DOC_ID = 'doc-1';
+const CITED_DOC_NAME = 'agentic-rag.md';
+const DOC_CONTENT =
+  '这是文献开头的介绍段落。Agentic RAG 通过多轮检索与证据校验降低幻觉，是本项目的核心能力。结尾段落用于占位。';
+// 命中片段在原文里的字符区间，跳原文后应高亮这一段
+const CITED_SNIPPET = 'Agentic RAG 通过多轮检索与证据校验降低幻觉';
+const CITED_SPAN: [number, number] = [
+  DOC_CONTENT.indexOf(CITED_SNIPPET),
+  DOC_CONTENT.indexOf(CITED_SNIPPET) + CITED_SNIPPET.length
+];
 
 async function mockKnowledgeApis(page: Page) {
   await page.route('**/api/knowledge', async (route) => {
@@ -21,13 +31,67 @@ async function mockKnowledgeApis(page: Page) {
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          documents: [{ id: 'doc-1', name: 'agentic-rag.md', createdAt: 1_720_000_000_000, chunkCount: 3 }]
+          documents: [{ id: CITED_DOC_ID, name: CITED_DOC_NAME, createdAt: 1_720_000_000_000, chunkCount: 3 }]
         })
       });
       return;
     }
 
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
+
+  // 点引用跳原文时会拉取整篇文档内容
+  await page.route(`**/api/knowledge/content/${CITED_DOC_ID}`, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: CITED_DOC_ID,
+        name: CITED_DOC_NAME,
+        content: DOC_CONTENT,
+        createdAt: 1_720_000_000_000
+      })
+    });
+  });
+}
+
+/** 带可点击引用（documentId + span）的对话流 */
+async function mockChatStreamWithCitation(page: Page) {
+  await page.route('**/api/chat/stream', async (route) => {
+    const body = [
+      sseFrame('status', { stage: 'run_started', runId: 'run-cite' }, 1),
+      sseFrame('plan', { runId: 'run-cite', intent: '检索知识库回答', needsTools: false, steps: [] }, 2),
+      sseFrame('delta', { text: `${ANSWER_TEXT}[^1]` }, 3),
+      sseFrame(
+        'done',
+        {
+          reason: 'complete',
+          runId: 'run-cite',
+          citations: [
+            {
+              index: 1,
+              id: 'chunk-1',
+              documentId: CITED_DOC_ID,
+              title: CITED_DOC_NAME,
+              snippet: CITED_SNIPPET,
+              source: `向量知识库 / ${CITED_DOC_NAME}`,
+              span: CITED_SPAN,
+              score: 0.82,
+              vectorScore: 0.8
+            }
+          ]
+        },
+        4
+      )
+    ].join('');
+
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache'
+      },
+      body
+    });
   });
 }
 
@@ -244,4 +308,29 @@ test('计划提前结束时时间线标出被跳过的步骤', async ({ page }) 
   await expect(page.getByText('search_literature（已跳过）')).toBeVisible();
   await expect(page.getByText('query_paper_memory（已跳过）')).toBeVisible();
   await expect(page.getByText('retrieve_knowledge', { exact: true })).toBeVisible();
+});
+
+test('点引用跳原文：从回答的来源卡片跳到知识库并高亮命中片段', async ({ page }) => {
+  await mockChatStreamWithCitation(page);
+  await page.goto('/');
+
+  await page.getByPlaceholder(/问问 research-agent/).fill(QUESTION_TEXT);
+  await page.getByRole('button', { name: '发送' }).click();
+
+  // 回答出来后，来源卡片带「查看原文」标记且可点击
+  await expect(page.getByText(ANSWER_TEXT)).toBeVisible();
+  const citationCard = page.locator('.source-card-clickable').first();
+  await expect(citationCard).toBeVisible();
+  await expect(citationCard.getByText('查看原文 ›')).toBeVisible();
+
+  // 点击后跳到知识库页，URL 带上 doc 与 span
+  await citationCard.click();
+  await expect(page).toHaveURL(
+    new RegExp(`/knowledge-base\\?doc=${CITED_DOC_ID}&span=${CITED_SPAN[0]}-${CITED_SPAN[1]}`)
+  );
+
+  // 文档查看弹窗自动打开，命中片段被 <mark> 高亮
+  const highlight = page.locator('.viewer-highlight');
+  await expect(highlight).toBeVisible();
+  await expect(highlight).toHaveText(CITED_SNIPPET);
 });

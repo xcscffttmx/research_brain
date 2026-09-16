@@ -74,6 +74,7 @@ export interface RagCitation {
   index: number;
   id: string;
   evidenceId?: string;
+  documentId: string;
   title: string;
   snippet: string;
   source: string;
@@ -560,6 +561,7 @@ export function buildCitations(evidence: RetrievedEvidence[]): RagCitation[] {
       index: index + 1,
       id: item.chunkId,
       evidenceId: item.evidenceId,
+      documentId: item.documentId,
       title: item.documentName,
       snippet: item.text.slice(0, EVIDENCE_SNIPPET_CHARS),
       source: `向量知识库 / ${item.documentName}`,

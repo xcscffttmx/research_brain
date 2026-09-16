@@ -41,15 +41,24 @@
           <strong>参考来源</strong>
           <span>{{ message.citations.length }} 条命中</span>
         </div>
-        <article v-for="(citation, index) in message.citations" :key="citation.id" class="source-card">
+        <component
+          :is="citation.documentId ? 'button' : 'article'"
+          v-for="(citation, index) in message.citations"
+          :key="citation.id"
+          class="source-card"
+          :class="{ 'source-card-clickable': Boolean(citation.documentId) }"
+          :type="citation.documentId ? 'button' : undefined"
+          @click="citation.documentId && openCitation(citation)"
+        >
           <div class="source-title-line">
             <el-tag size="small" effect="dark" round>{{ index + 1 }}</el-tag>
             <strong>{{ citation.title }}</strong>
             <el-tag v-if="citation.score" size="small" type="info" effect="plain"> 相关度 {{ citation.score }} </el-tag>
+            <el-tag v-if="citation.documentId" size="small" type="primary" effect="plain" round> 查看原文 › </el-tag>
           </div>
           <p>{{ citation.snippet }}</p>
           <small>{{ citation.source }}</small>
-        </article>
+        </component>
       </section>
     </div>
   </article>
@@ -57,12 +66,31 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { renderMarkdown } from '@/services/markdown';
-import type { ChatMessage, ToolStatus } from '@/types/chat';
+import type { ChatMessage, Citation, ToolStatus } from '@/types/chat';
 
 const props = defineProps<{
   message: ChatMessage;
 }>();
+
+const router = useRouter();
+
+/**
+ * 点引用跳原文：带上 documentId 与 span 跳到知识库页，
+ * 由 KnowledgeBasePage 打开对应文档并高亮命中片段。
+ * span 用 `start-end` 编码进 query，缺失时省略。
+ */
+function openCitation(citation: Citation): void {
+  if (!citation.documentId) return;
+  router.push({
+    name: 'knowledge-base',
+    query: {
+      doc: citation.documentId,
+      span: citation.span ? `${citation.span[0]}-${citation.span[1]}` : undefined
+    }
+  });
+}
 
 /** 工具状态到 el-tag 语义色的映射 */
 const TOOL_TAG_TYPE: Record<ToolStatus, 'info' | 'primary' | 'success' | 'danger'> = {

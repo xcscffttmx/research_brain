@@ -128,7 +128,12 @@ function isRagCitation(value: unknown): value is RagCitation {
 }
 
 function normalizeRagCitations(citations: unknown): RagCitation[] {
-  return Array.isArray(citations) ? citations.filter(isRagCitation) : [];
+  if (!Array.isArray(citations)) return [];
+  // documentId 早期没有，补一个空串占位，保证前端字段稳定
+  return citations.filter(isRagCitation).map((citation) => ({
+    ...citation,
+    documentId: typeof citation.documentId === 'string' ? citation.documentId : ''
+  }));
 }
 
 function getErrorPayload(error: unknown, fallbackMessage: string): ErrorPayload {
