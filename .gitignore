@@ -9,6 +9,9 @@ dist
 
 # build/test artifacts
 coverage
+.server-build
+playwright-report
+test-results
 *.log
 .turbo
 .vercel

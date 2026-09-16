@@ -1,11 +1,12 @@
 <template>
   <section class="conversation-shell">
     <div v-if="messages.length <= 1" class="conversation-empty">
-      <div class="empty-hero">
-        <div class="hero-chip">research-agent</div>
-        <h2>今天想探索什么？</h2>
+      <el-empty description="今天想探索什么？">
+        <template #image>
+          <div class="hero-chip">research-agent</div>
+        </template>
         <p>你可以直接聊天，也可以上传文档，让 Agent 自动调用后端工具完成向量检索与知识增强回答。</p>
-      </div>
+      </el-empty>
     </div>
 
     <DynamicScroller
@@ -50,8 +51,12 @@ async function scrollToBottom() {
   }
 }
 
+// 只观察最后一条消息：流式期间无需对整个列表做 O(n) 拼接比较
 watch(
-  () => props.messages.map((message) => `${message.id}:${message.content.length}:${message.status}`).join('|'),
+  () => {
+    const last = props.messages[props.messages.length - 1];
+    return last ? `${props.messages.length}:${last.id}:${last.content.length}:${last.status}` : '';
+  },
   () => {
     scrollToBottom();
   },

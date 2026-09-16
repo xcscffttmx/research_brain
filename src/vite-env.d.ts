@@ -26,10 +26,12 @@ declare global {
     abort(): void;
   }
 
-  var SpeechRecognition: {
-    prototype: SpeechRecognition;
-    new (): SpeechRecognition;
-  } | undefined;
+  var SpeechRecognition:
+    | {
+        prototype: SpeechRecognition;
+        new (): SpeechRecognition;
+      }
+    | undefined;
 }
 
 export {};

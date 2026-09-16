@@ -85,58 +85,58 @@ Express 层会对 MCP 返回做归一化处理，然后返回给前端。
 
 ### 1. 知识库工具
 
-| 工具名 | 说明 |
-|---|---|
-| `retrieve_knowledge` | 从向量知识库检索相关文档片段 |
-| `list_knowledge_documents` | 列出知识库文档 |
-| `get_knowledge_document_content` | 获取指定文档完整内容 |
-| `ingest_knowledge_documents` | 导入文档并建立向量索引 |
-| `delete_knowledge_document` | 删除指定文档和向量索引 |
-| `clear_knowledge_documents` | 清空知识库 |
+| 工具名                           | 说明                         |
+| -------------------------------- | ---------------------------- |
+| `retrieve_knowledge`             | 从向量知识库检索相关文档片段 |
+| `list_knowledge_documents`       | 列出知识库文档               |
+| `get_knowledge_document_content` | 获取指定文档完整内容         |
+| `ingest_knowledge_documents`     | 导入文档并建立向量索引       |
+| `delete_knowledge_document`      | 删除指定文档和向量索引       |
+| `clear_knowledge_documents`      | 清空知识库                   |
 
 ### 2. 基础工具
 
-| 工具名 | 说明 |
-|---|---|
+| 工具名             | 说明             |
+| ------------------ | ---------------- |
 | `get_current_time` | 获取当前系统时间 |
 
 ### 3. Agent 调度工具
 
-| 工具名 | 说明 |
-|---|---|
-| `list_agents` | 列出可用专业 Agent |
-| `select_agent` | 选择指定 Agent 处理任务 |
-| `get_agent_info` | 获取指定 Agent 信息 |
-| `agent协作` | 生成多 Agent 协作计划 |
+| 工具名           | 说明                    |
+| ---------------- | ----------------------- |
+| `list_agents`    | 列出可用专业 Agent      |
+| `select_agent`   | 选择指定 Agent 处理任务 |
+| `get_agent_info` | 获取指定 Agent 信息     |
+| `agent协作`      | 生成多 Agent 协作计划   |
 
 当前预置 Agent：
 
-| Agent | ID | 能力 |
-|---|---|---|
+| Agent          | ID                 | 能力                                       |
+| -------------- | ------------------ | ------------------------------------------ |
 | 文献检索 Agent | `literature-agent` | 文献搜索、文献分析、引用关系分析、文献摘要 |
-| 论文写作 Agent | `writing-agent` | 大纲生成、内容写作、语法检查、引用格式处理 |
-| 公式推导 Agent | `formula-agent` | 公式推导、公式验证、公式解释、公式应用 |
+| 论文写作 Agent | `writing-agent`    | 大纲生成、内容写作、语法检查、引用格式处理 |
+| 公式推导 Agent | `formula-agent`    | 公式推导、公式验证、公式解释、公式应用     |
 
 ### 4. 文献检索与分析工具
 
-| 工具名 | 说明 |
-|---|---|
-| `search_literature` | 从 arXiv / Semantic Scholar / OpenAlex 检索论文 |
-| `analyze_literature` | 分析检索到的文献内容和引用指标 |
-| `summarize_literature` | 基于检索结果生成文献摘要 |
-| `ingest_literature_to_knowledge` | 将检索论文导入知识库 |
-| `extract_paper_schema` | 抽取论文结构化 Paper Schema |
-| `get_paper_schema` | 获取已保存的 Paper Schema |
-| `query_paper_memory` | 基于 Paper Schema 做跨论文聚合分析 |
-| `mine_research_gaps` | 挖掘研究空白 |
-| `generate_experiment_spec` | 生成结构化实验方案 |
+| 工具名                           | 说明                                            |
+| -------------------------------- | ----------------------------------------------- |
+| `search_literature`              | 从 arXiv / Semantic Scholar / OpenAlex 检索论文 |
+| `analyze_literature`             | 分析检索到的文献内容和引用指标                  |
+| `summarize_literature`           | 基于检索结果生成文献摘要                        |
+| `ingest_literature_to_knowledge` | 将检索论文导入知识库                            |
+| `extract_paper_schema`           | 抽取论文结构化 Paper Schema                     |
+| `get_paper_schema`               | 获取已保存的 Paper Schema                       |
+| `query_paper_memory`             | 基于 Paper Schema 做跨论文聚合分析              |
+| `mine_research_gaps`             | 挖掘研究空白                                    |
+| `generate_experiment_spec`       | 生成结构化实验方案                              |
 
 ### 5. 论文写作工具
 
-| 工具名 | 说明 |
-|---|---|
+| 工具名             | 说明         |
+| ------------------ | ------------ |
 | `generate_outline` | 生成论文大纲 |
-| `write_content` | 撰写论文内容 |
+| `write_content`    | 撰写论文内容 |
 
 代码中还注册了更多与写作、公式、文献管理相关的工具，可在 `server/mcp-server.js` 中搜索 `server.registerTool` 查看完整列表。
 
@@ -204,16 +204,16 @@ MCP 工具内部会使用统一错误结构：
 
 常见错误：
 
-| 错误码 | 场景 |
-|---|---|
-| `MISSING_API_KEY` | 未配置 `QWEN_API_KEY` |
-| `INVALID_API_KEY` | Qwen API Key 无效或过期 |
-| `RATE_LIMITED` | Qwen 或上游服务限流 |
-| `NETWORK_UNREACHABLE` | 无法访问上游服务 |
-| `PAPER_NOT_FOUND` | 未找到指定论文，请先检索 |
-| `SCHEMA_NOT_FOUND` | 未找到 Paper Schema，请先抽取 |
-| `GAP_DATA_INSUFFICIENT` | 研究空白挖掘论文数量不足 |
-| `SPEC_DATA_INSUFFICIENT` | 实验方案生成论文数量不足 |
+| 错误码                   | 场景                          |
+| ------------------------ | ----------------------------- |
+| `MISSING_API_KEY`        | 未配置 `QWEN_API_KEY`         |
+| `INVALID_API_KEY`        | Qwen API Key 无效或过期       |
+| `RATE_LIMITED`           | Qwen 或上游服务限流           |
+| `NETWORK_UNREACHABLE`    | 无法访问上游服务              |
+| `PAPER_NOT_FOUND`        | 未找到指定论文，请先检索      |
+| `SCHEMA_NOT_FOUND`       | 未找到 Paper Schema，请先抽取 |
+| `GAP_DATA_INSUFFICIENT`  | 研究空白挖掘论文数量不足      |
+| `SPEC_DATA_INSUFFICIENT` | 实验方案生成论文数量不足      |
 
 ## 开发新 MCP 工具的建议
 

@@ -19,10 +19,16 @@
         </div>
 
         <!-- 新对话按钮 -->
-        <button type="button" class="new-chat-btn" :disabled="store.isResponding" @click="handleNewChat">
+        <el-button
+          class="new-chat-btn"
+          type="primary"
+          size="large"
+          :disabled="store.isResponding"
+          @click="handleNewChat"
+        >
           <span class="new-chat-icon" aria-hidden="true">＋</span>
           <span>新对话</span>
-        </button>
+        </el-button>
 
         <!-- 导航菜单 -->
         <nav class="sidebar-nav-menu" aria-label="主导航">
@@ -30,7 +36,11 @@
             <span class="nav-menu-icon" aria-hidden="true">
               <svg class="icon-svg icon-svg--22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 19.5A2.5 2.5 0 016.5 17H20" stroke-linecap="round" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" stroke-linecap="round" stroke-linejoin="round" />
+                <path
+                  d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </span>
             <span>向量知识库</span>
@@ -52,7 +62,10 @@
             <span class="nav-menu-icon" aria-hidden="true">
               <svg class="icon-svg icon-svg--22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3" />
-                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke-linecap="round" />
+                <path
+                  d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+                  stroke-linecap="round"
+                />
               </svg>
             </span>
             <span>更多</span>
@@ -65,7 +78,7 @@
           <div class="history-header">
             <span class="history-label">历史对话</span>
           </div>
-          <div class="history-list">
+          <el-scrollbar class="history-list">
             <div
               v-for="session in store.sessionList"
               :key="session.id"
@@ -74,27 +87,43 @@
             >
               <button type="button" class="history-item-main" @click="store.switchSession(session.id)">
                 <span class="history-item-icon" aria-hidden="true">
-                  <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <svg
+                    class="icon-svg icon-svg--20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
                     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke-linejoin="round" />
                   </svg>
                 </span>
                 <span class="history-item-title">{{ session.title || '新对话' }}</span>
               </button>
-              <button
-                type="button"
-                class="history-item-delete"
-                aria-label="删除会话"
-                @click.stop="store.deleteSession(session.id)"
+              <el-popconfirm
+                title="删除这个会话？删除后不可恢复。"
+                confirm-button-text="删除"
+                cancel-button-text="取消"
+                confirm-button-type="danger"
+                @confirm="store.deleteSession(session.id)"
               >
-                <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" />
-                </svg>
-              </button>
+                <template #reference>
+                  <button type="button" class="history-item-delete" aria-label="删除会话" @click.stop>
+                    <svg
+                      class="icon-svg icon-svg--20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                </template>
+              </el-popconfirm>
             </div>
-            <div v-if="store.sessionList.length === 0" class="history-empty">
-              <span>暂无历史对话</span>
-            </div>
-          </div>
+            <el-empty v-if="store.sessionList.length === 0" description="暂无历史对话" :image-size="48" />
+          </el-scrollbar>
         </div>
       </aside>
 
@@ -112,10 +141,31 @@
           @toggle-rag="store.toggleRag"
         />
 
+        <AgentTimeline
+          :stage="store.agentStage"
+          :plan="store.activePlan"
+          :verification="store.answerVerification"
+          :stop-early="store.planStopEarly"
+        />
+
         <AsyncChatPanel :messages="store.messages" />
 
-        <div v-if="store.noticeMessage" class="notice-banner">{{ store.noticeMessage }}</div>
-        <div v-if="store.errorMessage" class="error-banner">{{ store.errorMessage }}</div>
+        <el-alert
+          v-if="store.noticeMessage"
+          class="notice-banner"
+          type="info"
+          :title="store.noticeMessage"
+          :closable="false"
+          show-icon
+        />
+        <el-alert
+          v-if="store.errorMessage"
+          class="error-banner"
+          type="error"
+          :title="store.errorMessage"
+          :closable="false"
+          show-icon
+        />
 
         <ComposerPanel
           v-model="store.input"
@@ -132,38 +182,23 @@
     </section>
 
     <!-- Agent 选择弹窗 -->
-    <div
-      v-if="showAgentPanel"
-      class="agent-modal"
-      role="presentation"
-      @click.self="showAgentPanel = false"
-    >
-      <div class="agent-modal-content" role="dialog" aria-modal="true" aria-labelledby="agent-modal-title">
-        <div class="agent-modal-header">
-          <h3 id="agent-modal-title">选择科研 Agent</h3>
-          <button type="button" class="agent-modal-close" aria-label="关闭" @click="showAgentPanel = false">
-            <svg class="icon-svg icon-svg--20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" />
-            </svg>
-          </button>
-        </div>
-        <div class="agent-modal-list">
-          <button
-            v-for="agent in agents"
-            :key="agent.id"
-            type="button"
-            class="agent-modal-item"
-            @click="selectAgent(agent.id)"
-          >
-            <div class="agent-modal-icon" aria-hidden="true">{{ agent.badge }}</div>
-            <div class="agent-modal-info">
-              <strong>{{ agent.name }}</strong>
-              <p>{{ agent.description }}</p>
-            </div>
-          </button>
-        </div>
+    <el-dialog v-model="showAgentPanel" title="选择科研 Agent" width="520px" align-center>
+      <div class="agent-modal-list">
+        <button
+          v-for="agent in agents"
+          :key="agent.id"
+          type="button"
+          class="agent-modal-item"
+          @click="selectAgent(agent.id)"
+        >
+          <div class="agent-modal-icon" aria-hidden="true">{{ agent.badge }}</div>
+          <div class="agent-modal-info">
+            <strong>{{ agent.name }}</strong>
+            <p>{{ agent.description }}</p>
+          </div>
+        </button>
       </div>
-    </div>
+    </el-dialog>
   </main>
 </template>
 
@@ -171,6 +206,7 @@
 import { ref, defineAsyncComponent, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import ComposerPanel from '@/components/ComposerPanel.vue';
+import AgentTimeline from '@/components/AgentTimeline.vue';
 import TopBar from '@/components/TopBar.vue';
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition';
 import { useChatStore } from '@/stores/chat';
@@ -234,7 +270,7 @@ function toggleAgentPanel() {
 }
 
 function selectAgent(agentId: string) {
-  const agent = agents.find(a => a.id === agentId);
+  const agent = agents.find((a) => a.id === agentId);
   if (agent) {
     store.appendInput(`请使用 ${agent.name} 来帮助我`);
   }
