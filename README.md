@@ -361,7 +361,9 @@ docker run -d --name research-agent \
 
 镜像构建走多阶段：先编译前端与后端到 `.server-build` 与 `dist/`，运行时只装 `better-sqlite3` 所需的 native 依赖。SQLite 单文件部署，零外部依赖。
 
-> 该 Dockerfile 路径已通过本地编译验证，**真机 Docker 部署尚未测试**，发布前建议先在目标环境跑一遍。
+> 已在 macOS / Apple Silicon (linux/arm64) 上真机验证：`docker build` 通过，容器内
+> `better-sqlite3` native 模块正常加载、`sqlite-vec` 的 `vec0` 虚拟表可用，
+> `/api/health` 返回 `ok:true`（SQLite + MCP 全通），前端与 SPA 路由均 200。
 
 ---
 
@@ -398,9 +400,12 @@ docker run -d --name research-agent \
 
 - [ ] 把 `knowledge-state.json` 剩余的文献缓存与 Paper Schema 也迁入 SQLite（目前只有易变状态留在 JSON）
 - [ ] 用户体系 + 接口鉴权 + 多用户知识库隔离
-- [ ] 在真实环境验证 Docker 镜像（编译路径已验证）
 - [ ] 完整 Agent 调度中心（当前是 Qwen 工具调用 + MCP Tool 编排的简化形态）
 - [ ] 论文写作 Agent 与公式推导 Agent（目前工具多为骨架）
+
+已完成：
+
+- [x] 真机 Docker 部署验证（linux/arm64：镜像构建 + 容器内 SQLite/sqlite-vec/MCP 全通）
 
 不做（已验证无收益）：
 

@@ -197,7 +197,6 @@
 面试时主动讲局限比被问出来更好：
 
 - **`server/mcp-server.ts` 仍有 1478 行**，工具注册和业务逻辑混在一个文件。已抽出的部分：知识库工具（`server/mcp/knowledgeTools.ts`） + 工具函数辅助（`server/mcp/toolkit.ts`）。文献、分析、写作等工具仍在入口文件内，因为按职责拆分的边际收益递减。
-- **Docker 镜像未做真机验证**。Dockerfile 已按编译产物路径修正，但开发机没有 docker CLI，只验证了 `npm run build:server` 与编译后的 `migrate.js` 可执行。
 - **文献缓存仍是文件态**：`state.literature` 存在 `.data/knowledge-state.json`，未随文档/向量一起落 SQLite。
 - **无鉴权**：所有 `/api/*` 接口无认证，当前定位是单机自用。
 - **15 条 lint warning 未清**：主要是 `llmStreamAdapter` 里处理未知 payload 的 `any`，以及 Markdown 渲染的 `v-html`（已过 DOMPurify，但规则仍会告警）。

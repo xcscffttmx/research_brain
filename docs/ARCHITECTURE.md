@@ -606,7 +606,6 @@ SQLite 表结构（详见 `server/db/schema.sql`）：
 - 拆分 `server/mcp-server.ts`（当前约 2200 行），按知识库 / 文献 / 分析 / 写作分模块。
 - 把 `.data/knowledge-state.json` 里剩余的文献缓存与 Paper Schema 也迁入 SQLite。
 - 增加用户体系、接口鉴权、限流和审计日志（当前 `/api/*` 无认证）。
-- 在真实环境验证 Docker 镜像（目前只验证了编译产物路径）。
 - 增加 OpenAPI 文档和接口测试集合。
 - 实现完整 Agent 调度中心。
 - 实现论文写作 Agent 和公式推导 Agent（当前相关工具多为模拟实现）。
@@ -645,7 +644,7 @@ SQLite 表结构（详见 `server/db/schema.sql`）：
 
 ### 第五阶段：部署和产品化
 
-- 完善 Docker 部署（Dockerfile 已改为使用编译产物，尚未真机验证）。
+- 完善 Docker 部署（已在 linux/arm64 真机验证：镜像构建 + 容器内 SQLite/sqlite-vec/MCP 全通）。
 - 增加鉴权和安全控制（CORS 白名单与上传限额已落地，接口鉴权待做）。
 - 支持云部署和数据持久化。
 - 完善用户文档和反馈机制。
