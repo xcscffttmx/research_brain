@@ -263,6 +263,31 @@ test('对话主链路：发送问题后流式渲染出回答', async ({ page }) 
   await expect(page.locator('.history-item-title').getByText(QUESTION_TEXT)).toBeVisible();
 });
 
+test('主页上传文档：点击「上传文档」选择文件后走上传接口并提示导入成功', async ({ page }) => {
+  await page.route('**/api/knowledge/upload', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        documents: [{ id: 'doc-new', name: 'note.md', createdAt: 1_720_000_000_000, chunkCount: 1 }]
+      })
+    });
+  });
+  await page.goto('/');
+
+  // 主页输入区应有「上传文档」入口
+  await expect(page.getByRole('button', { name: '上传文档' })).toBeVisible();
+
+  // 点击按钮弹出文件选择器，选一个 .md 文件
+  const fileChooserPromise = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: '上传文档' }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles({ name: 'note.md', mimeType: 'text/markdown', buffer: Buffer.from('# 笔记') });
+
+  // 上传成功后出现提示横幅；文档计数累加（beforeEach 已 mock 出 1 份，上传 1 份后为 2 份）
+  await expect(page.getByText('已成功导入 1 份知识文件。')).toBeVisible();
+  await expect(page.getByText(/2\s*份\s*文档/)).toBeVisible();
+});
+
 test('知识库主链路：检索文献并产出 Schema / Gap / Spec', async ({ page }) => {
   await page.goto('/knowledge-base');
 

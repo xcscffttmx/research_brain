@@ -176,6 +176,7 @@
           :voice-status="speech.status.value"
           :voice-supported="speech.supported.value"
           @submit="store.sendMessage()"
+          @upload="handleUpload"
           @voice="handleVoice"
         />
       </section>
@@ -259,6 +260,11 @@ function handleVoice() {
   if (speech.status.value === 'idle') {
     speech.start();
   }
+}
+
+/** 上传知识文档：成功/失败提示由 store 写入 notice/error 横幅 */
+async function handleUpload(files: FileList) {
+  await store.uploadKnowledge(files);
 }
 
 function goToKnowledgeBase() {

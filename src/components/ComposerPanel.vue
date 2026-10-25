@@ -8,6 +8,15 @@
         <el-tag type="info" effect="plain" round>{{ documentCount }} 份文档</el-tag>
       </div>
       <div class="composer-toolbox">
+        <input
+          ref="fileInput"
+          class="composer-file-input"
+          type="file"
+          accept=".md,.markdown,.txt,.json,.pdf,.docx"
+          multiple
+          @change="handleFiles"
+        />
+        <el-button round @click="openFilePicker">上传文档</el-button>
         <el-button
           :type="voiceStatus === 'recording' ? 'danger' : 'default'"
           :disabled="!voiceSupported"
@@ -44,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { VoiceStatus } from '@/composables/useSpeechRecognition';
 
 const props = defineProps<{
@@ -57,11 +66,27 @@ const props = defineProps<{
   voiceError: string;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   'update:modelValue': [value: string];
   submit: [];
   voice: [];
+  upload: [files: FileList];
 }>();
+
+const fileInput = ref<HTMLInputElement | null>(null);
+
+function openFilePicker() {
+  fileInput.value?.click();
+}
+
+/** 选中文件后透传给上层上传；重置 input 以便再次选择同一文件 */
+function handleFiles(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (input.files?.length) {
+    emit('upload', input.files);
+    input.value = '';
+  }
+}
 
 const voiceButtonLabel = computed(() => {
   if (!props.voiceSupported) return '语音不可用';
@@ -70,3 +95,10 @@ const voiceButtonLabel = computed(() => {
   return '语音输入';
 });
 </script>
+
+<style scoped>
+/* 文件选择器由「上传文档」按钮触发，本身不可见 */
+.composer-file-input {
+  display: none;
+}
+</style>
