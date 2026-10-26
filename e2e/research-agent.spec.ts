@@ -11,6 +11,17 @@ function sseFrame(event: string, data: Record<string, unknown>, id: number) {
   return `id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+/**
+ * 前端有强制登录路由守卫（main.ts beforeEach）：未登录访问主页/知识库会跳 /login。
+ * 这里在每个用例前注入本地登录态，让 E2E 直接落在已登录的主页上。
+ */
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('research_brain_token', 'e2e-test-token');
+    localStorage.setItem('research_brain_user', JSON.stringify({ id: 'e2e-user', username: 'e2e', createdAt: 0 }));
+  });
+});
+
 const ANSWER_TEXT = 'Agentic RAG 通过检索、精排和证据校验降低幻觉。';
 const QUESTION_TEXT = 'Agentic RAG 如何降低幻觉？';
 const PAPER_TITLE = 'Agentic Retrieval for Grounded Research Assistants';
