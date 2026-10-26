@@ -7,10 +7,20 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
+-- ---------- 用户与鉴权 ----------
+
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,             -- scrypt("盐:哈希")
+  created_at    INTEGER NOT NULL
+);
+
 -- ---------- 会话与消息（分层 Context 的持久化基础） ----------
 
 CREATE TABLE IF NOT EXISTS sessions (
   id            TEXT PRIMARY KEY,
+  user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,  -- 所属用户，NULL 表示历史/匿名数据
   title         TEXT NOT NULL DEFAULT '新对话',
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL,
@@ -37,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_seq ON messages(session_id, seq)
 
 CREATE TABLE IF NOT EXISTS documents (
   id          TEXT PRIMARY KEY,
+  user_id     TEXT REFERENCES users(id) ON DELETE CASCADE,  -- 文档归属用户，NULL 表示历史/公共数据
   name        TEXT NOT NULL,
   mime_type   TEXT NOT NULL DEFAULT '',
   size_bytes  INTEGER NOT NULL DEFAULT 0,

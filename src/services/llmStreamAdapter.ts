@@ -7,6 +7,8 @@
  *   3. 输出 Gate：拦截异常中断、重复内容、乱序帧，保证下游拿到的是干净流
  */
 
+import { getToken } from './http';
+
 /** 统一事件模型 */
 export type StreamEventType = 'delta' | 'plan' | 'tool_call' | 'tool_result' | 'status' | 'usage' | 'error' | 'done';
 
@@ -468,9 +470,14 @@ export async function* streamAgentChat(
   options: StreamAdapterOptions = {}
 ): AsyncGenerator<StreamEvent, GateStats | void, void> {
   const fetchImpl = options.fetchImpl ?? fetch;
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  const token = getToken();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
   const response = await fetchImpl('/api/chat/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
     signal: options.signal
   });

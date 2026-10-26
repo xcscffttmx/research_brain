@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { buildCitation, chunkText, MIN_VECTOR_SCORE } from './knowledgeBase.js';
+import { describe, it, expect, beforeAll } from 'vitest';
+import {
+  buildCitation,
+  chunkText,
+  MIN_VECTOR_SCORE,
+  extractTextFromFile,
+  loadDocumentParsers
+} from './knowledgeBase.js';
 
 describe('chunkText', () => {
   it('短文本只产出一个分块，区间覆盖全文', () => {
@@ -67,5 +73,48 @@ describe('buildCitation', () => {
 describe('MIN_VECTOR_SCORE', () => {
   it('保持噪声过滤下限不被无意改动', () => {
     expect(MIN_VECTOR_SCORE).toBe(0.15);
+  });
+});
+
+/** 生成一个含可检索文本的最小合法 PDF 字节，用于验证解析库。 */
+function buildMinimalPdf(text: string): Buffer {
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n'
+  ];
+  const stream = `BT\n/F1 18 Tf\n72 700 Td\n(${text}) Tj\nET\n`;
+  objects.push(`4 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}endstream\nendobj\n`);
+  objects.push('5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
+
+  let body = '%PDF-1.4\n' + objects.join('');
+  let offset = '%PDF-1.4\n'.length;
+  const offsets = objects.map((obj) => {
+    const off = offset;
+    offset += obj.length;
+    return off;
+  });
+
+  body += `xref\n0 6\n0000000000 65535 f \n`;
+  for (const o of offsets) body += `${String(o).padStart(10, '0')} 00000 n \n`;
+  body += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${offset}\n%%EOF\n`;
+  return Buffer.from(body, 'utf-8');
+}
+
+describe('extractTextFromFile / PDF', () => {
+  beforeAll(async () => {
+    await loadDocumentParsers();
+  });
+
+  it('能从 Base64 编码的PDF中提取正文文本', async () => {
+    const buffer = buildMinimalPdf('ResearchAgent PDF extraction test');
+    const text = await extractTextFromFile({
+      name: 'sample.pdf',
+      content: buffer.toString('base64'),
+      isBinary: true
+    });
+    expect(text).toContain('ResearchAgent PDF extraction test');
+    // 不应混入 v2 默认的页分隔横幅（"-- N of N --"）
+    expect(text).not.toMatch(/--\s*\d+ of \d+\s*--/);
   });
 });

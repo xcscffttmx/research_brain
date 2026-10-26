@@ -12,6 +12,7 @@ import type {
   ToolInvocation
 } from '@/types/chat';
 import { streamAgentChat as consumeAgentStream } from './llmStreamAdapter';
+import { apiFetch } from './http';
 
 function formatApiError(payload: Partial<ApiErrorPayload>, fallback: string) {
   const message = payload.error || fallback;
@@ -99,7 +100,7 @@ export async function streamAgentChat(
 
 /** 通知服务端取消指定 run（HTTP 断开之外的显式取消，便于服务端立即回收工具调用） */
 export async function abortAgentRun(runId: string) {
-  await fetch('/api/chat/abort', {
+  await apiFetch('/api/chat/abort', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ runId })
@@ -107,7 +108,7 @@ export async function abortAgentRun(runId: string) {
 }
 
 export async function fetchKnowledgeDocuments(): Promise<ServerDocumentResponse[]> {
-  const response = await fetch('/api/knowledge');
+  const response = await apiFetch('/api/knowledge');
   const data = await response.json();
 
   if (!response.ok) {
@@ -120,7 +121,7 @@ export async function fetchKnowledgeDocuments(): Promise<ServerDocumentResponse[
 export async function fetchKnowledgeDocumentContent(
   id: string
 ): Promise<{ id: string; name: string; content: string; createdAt: number }> {
-  const response = await fetch(`/api/knowledge/content/${id}`);
+  const response = await apiFetch(`/api/knowledge/content/${id}`);
   const data = await response.json();
 
   if (!response.ok) {
@@ -134,7 +135,7 @@ export async function uploadKnowledgeDocuments(files: FileList | File[]): Promis
   const formData = new FormData();
   Array.from(files).forEach((file) => formData.append('files', file));
 
-  const response = await fetch('/api/knowledge/upload', {
+  const response = await apiFetch('/api/knowledge/upload', {
     method: 'POST',
     body: formData
   });
@@ -148,7 +149,7 @@ export async function uploadKnowledgeDocuments(files: FileList | File[]): Promis
 }
 
 export async function deleteKnowledgeDocument(id: string) {
-  const response = await fetch(`/api/knowledge/${id}`, { method: 'DELETE' });
+  const response = await apiFetch(`/api/knowledge/${id}`, { method: 'DELETE' });
   if (!response.ok) {
     let data: Partial<ApiErrorPayload> = {};
     try {
@@ -161,7 +162,7 @@ export async function deleteKnowledgeDocument(id: string) {
 }
 
 export async function clearKnowledgeDocuments() {
-  const response = await fetch('/api/knowledge', { method: 'DELETE' });
+  const response = await apiFetch('/api/knowledge', { method: 'DELETE' });
   if (!response.ok) {
     let data: Partial<ApiErrorPayload> = {};
     try {
@@ -180,7 +181,7 @@ export async function searchLiterature(
   sinceYear?: number,
   untilYear?: number
 ) {
-  const response = await fetch('/api/research/search-literature', {
+  const response = await apiFetch('/api/research/search-literature', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, limit, source, sinceYear, untilYear })
@@ -193,7 +194,7 @@ export async function searchLiterature(
 }
 
 export async function ingestLiteratureToKnowledge(paperIds: string[]) {
-  const response = await fetch('/api/research/ingest-literature', {
+  const response = await apiFetch('/api/research/ingest-literature', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paperIds })
@@ -206,7 +207,7 @@ export async function ingestLiteratureToKnowledge(paperIds: string[]) {
 }
 
 export async function extractPaperSchema(paperId: string) {
-  const response = await fetch('/api/research/paper-schema/extract', {
+  const response = await apiFetch('/api/research/paper-schema/extract', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paperId })
@@ -219,7 +220,7 @@ export async function extractPaperSchema(paperId: string) {
 }
 
 export async function mineResearchGaps(focus = '') {
-  const response = await fetch('/api/research/gaps/mine', {
+  const response = await apiFetch('/api/research/gaps/mine', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ focus })
@@ -232,7 +233,7 @@ export async function mineResearchGaps(focus = '') {
 }
 
 export async function generateExperimentSpec(focus = '', gapIndex = 0) {
-  const response = await fetch('/api/research/spec/generate', {
+  const response = await apiFetch('/api/research/spec/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ focus, gapIndex })

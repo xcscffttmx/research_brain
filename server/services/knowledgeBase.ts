@@ -12,7 +12,16 @@ import type { VectorSearchHit } from '../repositories/chunkRepo.js';
 import type { DocumentRow } from '../db/types.js';
 import { isRecord, toAppError } from '../mcp/toolkit.js';
 
-type PdfParser = (buffer: Buffer) => Promise<{ text: string }>;
+/**
+ * pdf-parse v2 的 `PDFParse` 类构造函数。v2 移除了 v1 的默认函数式 API，
+ * 改为 `new PDFParse({ data })` + `getText()`。这里只声明用到的最小类型。
+ */
+type PdfParser = {
+  new (options: { data: ArrayBuffer | Uint8Array<ArrayBufferLike> | string | number[] }): {
+    getText(params?: { pageJoiner?: string }): Promise<{ text: string }>;
+    destroy(): Promise<void>;
+  };
+};
 type MammothParser = { extractRawText(input: { buffer: Buffer }): Promise<{ value: string }> };
 
 export interface TextChunk {
@@ -47,8 +56,9 @@ let mammoth: MammothParser | null = null;
 
 export async function loadDocumentParsers(): Promise<void> {
   try {
-    const pdfParse = (await import('pdf-parse')) as unknown as PdfParser & { default?: PdfParser };
-    pdf = typeof pdfParse.default === 'function' ? pdfParse.default : pdfParse;
+    // pdf-parse v2：命名导出 PDFParse 类（old API 已被移除）
+    const pdfModule = (await import('pdf-parse')) as unknown as { PDFParse?: PdfParser };
+    pdf = pdfModule.PDFParse ?? null;
     const mammothImport = await import('mammoth');
     mammoth = (
       isRecord(mammothImport) && isRecord(mammothImport.default) ? mammothImport.default : mammothImport
@@ -90,14 +100,14 @@ export function buildCitation(row: VectorSearchHit): KnowledgeCitation {
   };
 }
 
-export async function searchKnowledge(query: string, topK = 4): Promise<KnowledgeCitation[]> {
+export async function searchKnowledge(query: string, topK = 4, userId?: string): Promise<KnowledgeCitation[]> {
   if (!chunkRepo.countChunks()) {
     return [];
   }
 
   const queryEmbedding = await createEmbedding(query);
   return chunkRepo
-    .searchChunksByVector(queryEmbedding, topK)
+    .searchChunksByVector(queryEmbedding, topK, userId)
     .filter((row) => row.score > MIN_VECTOR_SCORE)
     .map(buildCitation);
 }
@@ -109,11 +119,13 @@ export async function searchKnowledge(query: string, topK = 4): Promise<Knowledg
 export async function persistDocumentWithChunks({
   name,
   content,
-  source
+  source,
+  userId
 }: {
   name: string;
   content: string;
   source: string;
+  userId?: string;
 }): Promise<DocumentRow> {
   const parts = chunkText(content);
   const items = [];
@@ -123,6 +135,7 @@ export async function persistDocumentWithChunks({
 
   const document = chunkRepo.createDocument({
     name,
+    userId,
     content,
     charCount: content.length,
     sizeBytes: Buffer.byteLength(content, 'utf-8'),
@@ -145,13 +158,22 @@ export async function extractTextFromFile(document: UploadedDocument): Promise<s
     if (!pdf) {
       throw createAppError('PDF_LIBRARY_NOT_LOADED', 'PDF处理库未加载', '请检查依赖安装是否正确。', 500);
     }
+    const pdfData = Buffer.from(content, isBinary ? 'base64' : 'utf-8');
+    // pdf-parse 接受 TypedArray/ArrayBuffer；从 Buffer 切出等长的底层缓冲（等长且索引对齐）
+    const arrayBuffer: ArrayBuffer | Uint8Array<ArrayBufferLike> | string | number[] = pdfData.buffer.slice(
+      pdfData.byteOffset,
+      pdfData.byteOffset + pdfData.byteLength
+    );
+    const parser = new pdf({ data: arrayBuffer });
     try {
-      const pdfData = Buffer.from(content, isBinary ? 'base64' : 'utf-8');
-      const pdfResult = await pdf(pdfData);
+      // pageJoiner 用换行代替默认的页分隔横幅（如 "-- 1 of 3 --"），避免污染正文
+      const pdfResult = await parser.getText({ pageJoiner: '\n' });
       return pdfResult.text;
     } catch (error) {
       console.error('处理PDF文件时出错:', error);
       throw createAppError('PDF_PROCESS_ERROR', 'PDF文件处理失败', toAppError(error).message, 400);
+    } finally {
+      await parser.destroy().catch(() => undefined);
     }
   }
 
@@ -174,7 +196,10 @@ export async function extractTextFromFile(document: UploadedDocument): Promise<s
 }
 
 /** 批量导入：单个文件解析失败或内容为空时跳过，不中断整批 */
-export async function ingestDocuments(documents: UploadedDocument[]): Promise<Array<Record<string, unknown>>> {
+export async function ingestDocuments(
+  documents: UploadedDocument[],
+  userId?: string
+): Promise<Array<Record<string, unknown>>> {
   const supported = documents.filter((document) => SUPPORTED_FILE_PATTERN.test(document.name));
 
   if (!supported.length) {
@@ -200,7 +225,7 @@ export async function ingestDocuments(documents: UploadedDocument[]): Promise<Ar
     content = content.trim();
     if (!content) continue;
 
-    const document = await persistDocumentWithChunks({ name: source.name, content, source: 'upload' });
+    const document = await persistDocumentWithChunks({ name: source.name, content, source: 'upload', userId });
     inserted.push({ id: document.id, name: document.name, createdAt: document.created_at });
   }
 
@@ -211,8 +236,8 @@ export async function ingestDocuments(documents: UploadedDocument[]): Promise<Ar
   return inserted;
 }
 
-export function listDocuments(): Array<Record<string, unknown>> {
-  return chunkRepo.listDocuments().map((document) => ({
+export function listDocuments(userId?: string): Array<Record<string, unknown>> {
+  return chunkRepo.listDocuments(userId).map((document) => ({
     id: document.id,
     name: document.name,
     createdAt: document.created_at,
@@ -220,8 +245,8 @@ export function listDocuments(): Array<Record<string, unknown>> {
   }));
 }
 
-export function getDocumentContent(id: string): Record<string, unknown> {
-  const document = chunkRepo.getDocument(id);
+export function getDocumentContent(id: string, userId?: string): Record<string, unknown> {
+  const document = chunkRepo.getDocument(id, userId);
   if (!document) {
     throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
   }
@@ -233,8 +258,8 @@ export function getDocumentContent(id: string): Record<string, unknown> {
   };
 }
 
-export function deleteDocument(id: string): Record<string, unknown> {
-  if (!chunkRepo.deleteDocument(id)) {
+export function deleteDocument(id: string, userId?: string): Record<string, unknown> {
+  if (!chunkRepo.deleteDocument(id, userId)) {
     throw createAppError('DOCUMENT_NOT_FOUND', '知识文件不存在', '请确认传入的文档 ID 是否正确。', 404);
   }
   return { ok: true, id };

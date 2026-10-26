@@ -143,6 +143,8 @@ export interface RunAgenticRagInput {
   cancelNode?: CancelLike;
   persist?: boolean;
   useHyde?: boolean;
+  /** 归属用户；传值时向量检索只命中该用户私有文档，避免跨用户泄漏 */
+  userId?: string;
   deps?: RagDeps;
 }
 
@@ -406,10 +408,20 @@ export async function runAgenticRag({
   cancelNode,
   persist = true,
   useHyde = true,
+  userId,
   deps = {}
 }: RunAgenticRagInput): Promise<RunAgenticRagResult> {
   const { qwenFetch = defaultQwenFetch } = deps;
   const signal = cancelNode?.signal;
+
+  // 归属过滤：向量检索只能命中自己的私有文档，避免跨用户泄漏
+  const scopedDeps: RagDeps = userId
+    ? {
+        ...deps,
+        searchChunksByVector: (embedding, topK = VECTOR_TOP_K) =>
+          chunkRepo.searchChunksByVector(embedding, topK, userId)
+      }
+    : deps;
 
   cancelNode?.throwIfCancelled?.();
   emit?.status?.('rag_planning', {});
@@ -440,7 +452,7 @@ export async function runAgenticRag({
       question,
       queries: effectiveQueries,
       seenChunkIds,
-      deps,
+      deps: scopedDeps,
       signal
     });
 

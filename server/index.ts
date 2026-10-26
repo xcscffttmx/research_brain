@@ -18,6 +18,9 @@ import { runAgenticRag } from './services/agenticRag.js';
 import type { RagCitation } from './services/agenticRag.js';
 import { buildContext, countTokens } from './services/contextManager.js';
 import * as sessionRepo from './repositories/sessionRepo.js';
+import { authRequired, type AuthedRequest } from './auth/authRequired.js';
+import { register as registerUser, login as loginUser, me as meUser } from './auth/authService.js';
+import { getCache } from './lib/cache.js';
 import * as messageRepo from './repositories/messageRepo.js';
 import * as agentRunRepo from './repositories/agentRunRepo.js';
 
@@ -255,6 +258,38 @@ async function callMcpTool(name: string, args: Record<string, unknown> = {}): Pr
   return structured;
 }
 
+// ---------- 认证：注册 / 登录 / 当前用户 ----------
+app.post('/api/auth/register', (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const user = registerUser(username, password);
+    res.status(201).json({ user });
+  } catch (error) {
+    const payload = getErrorPayload(error, '注册失败');
+    res.status(payload.status).json({ error: payload.message, code: payload.code, details: payload.details });
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const result = loginUser(username, password);
+    res.json(result);
+  } catch (error) {
+    const payload = getErrorPayload(error, '登录失败');
+    res.status(payload.status).json({ error: payload.message, code: payload.code, details: payload.details });
+  }
+});
+
+app.get('/api/auth/me', authRequired, (req: AuthedRequest, res) => {
+  const user = req.user && meUser(req.user.userId);
+  if (!user) {
+    res.status(401).json({ error: '用户不存在', code: 'UNAUTHORIZED' });
+    return;
+  }
+  res.json({ user });
+});
+
 app.get('/api/health', async (_: Request, res: Response) => {
   try {
     const [dbHealth, mcpResult] = await Promise.all([
@@ -297,18 +332,30 @@ app.get('/api/health', async (_: Request, res: Response) => {
   }
 });
 
-app.get('/api/knowledge', async (_: Request, res: Response) => {
+// 受保护路由：必须先登录拿到 JWT，才能读写知识库（私有知识库仅本人可访问）
+app.get('/api/knowledge', authRequired, async (req: AuthedRequest, res) => {
   try {
+    const userId = req.user!.userId;
+    const cache = getCache();
+    const cacheKey = `knowledge:list:${userId}`;
+    // 1) 先查缓存：命中直接返回，避免每次都打数据库/MCP
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      res.json({ documents: JSON.parse(cached), fromCache: true });
+      return;
+    }
+    // 2) 缓存未命中：走 MCP 列表（内部按 user_id 过滤），再写回缓存
     const session = await createMcpSession();
     const result = await session.client.callTool({
       name: 'list_knowledge_documents',
-      arguments: {}
+      arguments: { userId }
     });
 
     const structured = normalizeStructuredContent(result);
-    res.json({
-      documents: structured.documents || []
-    });
+    const documents = structured.documents || [];
+    // 3) 写缓存，TTL 60s；写操作（上传/删除）时会主动删除该 key，保证一致性
+    await cache.set(cacheKey, JSON.stringify(documents), 60);
+    res.json({ documents });
   } catch (error) {
     const payload = getErrorPayload(error, '加载知识库失败');
     res.status(payload.status).json({
@@ -319,12 +366,12 @@ app.get('/api/knowledge', async (_: Request, res: Response) => {
   }
 });
 
-app.get('/api/knowledge/content/:id', async (req, res) => {
+app.get('/api/knowledge/content/:id', authRequired, async (req: AuthedRequest, res) => {
   try {
     const session = await createMcpSession();
     const result = await session.client.callTool({
       name: 'get_knowledge_document_content',
-      arguments: { id: req.params.id }
+      arguments: { id: req.params.id, userId: req.user!.userId }
     });
 
     const structured = normalizeStructuredContent(result);
@@ -348,13 +395,15 @@ app.get('/api/knowledge/content/:id', async (req, res) => {
   }
 });
 
-app.post('/api/knowledge/upload', upload.array('files'), async (req, res) => {
+app.post('/api/knowledge/upload', authRequired, upload.array('files'), async (req: AuthedRequest, res) => {
   try {
     const files = Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : [];
+    const userId = req.user!.userId;
     const session = await createMcpSession();
     const result = await session.client.callTool({
       name: 'ingest_knowledge_documents',
       arguments: {
+        userId,
         documents: files.map((file) => {
           const name = file.originalname.toLowerCase();
           if (name.endsWith('.pdf') || name.endsWith('.docx')) {
@@ -386,6 +435,9 @@ app.post('/api/knowledge/upload', upload.array('files'), async (req, res) => {
       );
     }
 
+    // 数据变更后删除缓存，保证下次读取一致（Cache-Aside 失效策略）
+    await getCache().del(`knowledge:list:${userId}`);
+
     res.json({
       documents: structured.documents || [],
       message: structured.message || '上传成功'
@@ -400,12 +452,12 @@ app.post('/api/knowledge/upload', upload.array('files'), async (req, res) => {
   }
 });
 
-app.delete('/api/knowledge/:id', async (req, res) => {
+app.delete('/api/knowledge/:id', authRequired, async (req: AuthedRequest, res) => {
   try {
     const session = await createMcpSession();
     const result = await session.client.callTool({
       name: 'delete_knowledge_document',
-      arguments: { id: req.params.id }
+      arguments: { id: req.params.id, userId: req.user!.userId }
     });
 
     const structured = normalizeStructuredContent(result);
@@ -418,6 +470,8 @@ app.delete('/api/knowledge/:id', async (req, res) => {
       );
     }
 
+    await getCache().del(`knowledge:list:${req.user!.userId}`);
+
     res.json({ ok: true });
   } catch (error) {
     const payload = getErrorPayload(error, '删除失败');
@@ -429,12 +483,12 @@ app.delete('/api/knowledge/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/knowledge', async (_: Request, res: Response) => {
+app.delete('/api/knowledge', authRequired, async (req: AuthedRequest, res) => {
   try {
     const session = await createMcpSession();
     const result = await session.client.callTool({
       name: 'clear_knowledge_documents',
-      arguments: {}
+      arguments: { userId: req.user!.userId }
     });
 
     const structured = normalizeStructuredContent(result);
@@ -446,6 +500,8 @@ app.delete('/api/knowledge', async (_: Request, res: Response) => {
         400
       );
     }
+
+    await getCache().del(`knowledge:list:${req.user!.userId}`);
 
     res.json({ ok: true });
   } catch (error) {
@@ -577,7 +633,7 @@ async function callAgentTool(toolName: string, args: unknown, signal: AbortSigna
   return structured;
 }
 
-app.post('/api/chat/stream', async (req, res) => {
+app.post('/api/chat/stream', authRequired, async (req: AuthedRequest, res) => {
   const emit = createSseWriter(res);
 
   // HTTP 连接断开 -> 取消树根节点 abort -> 级联终止所有在途工具调用
@@ -642,8 +698,15 @@ app.post('/api/chat/stream', async (req, res) => {
       persist,
       deps: {
         qwenFetch,
-        callTool: callAgentTool,
-        runRag: runAgenticRag,
+        callTool: (toolName, args, signal) => {
+          // 检索类工具强制注入当前用户归属，避免 Agent 检索到他人私有文档
+          const augmented =
+            toolName === 'retrieve_knowledge' && req.user?.userId && isRecord(args)
+              ? { ...args, userId: req.user.userId }
+              : args;
+          return callAgentTool(toolName, augmented, signal);
+        },
+        runRag: (ragInput) => runAgenticRag({ ...ragInput, userId: req.user?.userId }),
         // 生成阶段负责注入证据、核查 groundedness，必要时补充检索
         generateAnswer: (ctx, signal, onDelta, meta) =>
           generateAnswerWithGroundedness({
@@ -689,7 +752,7 @@ app.post('/api/chat/stream', async (req, res) => {
 });
 
 /** 停止生成：按 runId 精确取消一次运行 */
-app.post('/api/chat/abort', (req, res) => {
+app.post('/api/chat/abort', authRequired, (req, res) => {
   const runId = String(req.body?.runId || '').trim();
   if (!runId) {
     res.status(400).json({ error: 'runId 不能为空', code: 'INVALID_RUN_ID' });

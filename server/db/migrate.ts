@@ -39,6 +39,29 @@ const MIGRATIONS: Migration[] = [
       if (columns.some((column) => column.name === 'content')) return;
       db.exec("alter table documents add column content TEXT NOT NULL DEFAULT ''");
     }
+  },
+  {
+    version: 3,
+    name: 'users table + user_id on documents/sessions',
+    up(db) {
+      // 新库由 schema.sql 直接建出，这里只给老库补列（幂等）
+      db.exec(`
+        create table if not exists users (
+          id            text primary key,
+          username      text not null unique,
+          password_hash text not null,
+          created_at    integer not null
+        )
+      `);
+      const addColumn = (table: string, column: string, ddl: string) => {
+        const columns = db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
+        if (!columns.some((item) => item.name === column)) {
+          db.exec(`alter table ${table} add column ${ddl}`);
+        }
+      };
+      addColumn('documents', 'user_id', 'user_id TEXT REFERENCES users(id) ON DELETE CASCADE');
+      addColumn('sessions', 'user_id', 'user_id TEXT REFERENCES users(id) ON DELETE CASCADE');
+    }
   }
 ];
 

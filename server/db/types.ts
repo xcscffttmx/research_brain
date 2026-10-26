@@ -5,8 +5,16 @@
  * 由 better-sqlite3 直接映射，不做驼峰转换，避免多一层心智负担。
  */
 
+export interface UserRow {
+  id: string;
+  username: string;
+  password_hash: string;
+  created_at: number;
+}
+
 export interface SessionRow {
   id: string;
+  user_id: string | null;
   title: string;
   created_at: number;
   updated_at: number;
@@ -31,6 +39,7 @@ export interface MessageRow {
 
 export interface DocumentRow {
   id: string;
+  user_id: string | null;
   name: string;
   mime_type: string;
   size_bytes: number;

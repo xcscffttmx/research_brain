@@ -23,12 +23,13 @@ export function registerKnowledgeTools(server: McpToolServer): void {
       description: '从后端向量知识库检索与用户问题最相关的文档片段',
       inputSchema: z.object({
         query: z.string().min(1, 'query 不能为空'),
-        topK: z.number().int().min(1).max(10).optional()
+        topK: z.number().int().min(1).max(10).optional(),
+        userId: z.string().optional()
       })
     },
-    async ({ query, topK = 4 }: { query: string; topK?: number }) => {
+    async ({ query, topK = 4, userId }: { query: string; topK?: number; userId?: string }) => {
       try {
-        const citations = await searchKnowledge(query, topK);
+        const citations = await searchKnowledge(query, topK, userId);
         return toTextContent({ citations, count: citations.length });
       } catch (error) {
         return toErrorContent(error);
@@ -39,10 +40,12 @@ export function registerKnowledgeTools(server: McpToolServer): void {
   server.registerTool(
     'list_knowledge_documents',
     {
-      description: '列出当前后端知识库中的文档',
-      inputSchema: z.object({})
+      description: '列出当前用户知识库中的文档',
+      inputSchema: z.object({
+        userId: z.string().optional()
+      })
     },
-    async () => toTextContent({ documents: listDocuments() })
+    async ({ userId }: { userId?: string }) => toTextContent({ documents: listDocuments(userId) })
   );
 
   server.registerTool(
@@ -50,12 +53,13 @@ export function registerKnowledgeTools(server: McpToolServer): void {
     {
       description: '获取指定知识文档的完整内容',
       inputSchema: z.object({
-        id: z.string().min(1, 'id 不能为空')
+        id: z.string().min(1, 'id 不能为空'),
+        userId: z.string().optional()
       })
     },
-    async ({ id }: { id: string }) => {
+    async ({ id, userId }: { id: string; userId?: string }) => {
       try {
-        return toTextContent(getDocumentContent(id));
+        return toTextContent(getDocumentContent(id, userId));
       } catch (error) {
         return toErrorContent(error);
       }
@@ -75,12 +79,19 @@ export function registerKnowledgeTools(server: McpToolServer): void {
               isBinary: z.boolean().optional()
             })
           )
-          .min(1, '至少导入一份文档')
+          .min(1, '至少导入一份文档'),
+        userId: z.string().optional()
       })
     },
-    async ({ documents }: { documents: Array<{ name: string; content: string; isBinary?: boolean }> }) => {
+    async ({
+      documents,
+      userId
+    }: {
+      documents: Array<{ name: string; content: string; isBinary?: boolean }>;
+      userId?: string;
+    }) => {
       try {
-        const inserted = await ingestDocuments(documents);
+        const inserted = await ingestDocuments(documents, userId);
         return toTextContent({ documents: inserted, message: `已成功导入 ${inserted.length} 份知识文件。` });
       } catch (error) {
         return toErrorContent(error);
@@ -93,12 +104,13 @@ export function registerKnowledgeTools(server: McpToolServer): void {
     {
       description: '删除指定的知识文档以及对应的向量索引',
       inputSchema: z.object({
-        id: z.string().min(1, 'id 不能为空')
+        id: z.string().min(1, 'id 不能为空'),
+        userId: z.string().optional()
       })
     },
-    async ({ id }: { id: string }) => {
+    async ({ id, userId }: { id: string; userId?: string }) => {
       try {
-        return toTextContent(deleteDocument(id));
+        return toTextContent(deleteDocument(id, userId));
       } catch (error) {
         return toErrorContent(error);
       }

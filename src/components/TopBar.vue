@@ -71,13 +71,34 @@
 
       <el-button :disabled="disabled" @click="$emit('new-session')">新对话</el-button>
       <el-button type="danger" plain :disabled="!isResponding" @click="$emit('stop')">停止输出</el-button>
+
+      <el-tooltip content="退出登录" placement="bottom">
+        <el-button text circle aria-label="退出登录" @click="handleLogout">
+          <svg
+            class="icon-svg icon-svg--22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <path
+              d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </el-button>
+      </el-tooltip>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { useTheme } from '@/composables/useTheme';
+import { useAuthStore } from '@/stores/auth';
 
 const props = defineProps<{
   ragEnabled: boolean;
@@ -96,6 +117,13 @@ defineEmits<{
 }>();
 
 const { isDark, toggle } = useTheme();
+const auth = useAuthStore();
+const router = useRouter();
+
+function handleLogout() {
+  auth.logout();
+  router.replace('/login');
+}
 
 const titleText = computed(
   () =>
